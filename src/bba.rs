@@ -6,6 +6,7 @@ use crate::fft::lagrange_commitments;
 use crate::proof_system;
 use crate::schnorr;
 use algebra::{AffineCurve, PrimeField, ProjectiveCurve, UniformRand, VariableBaseMSM, Zero};
+use array_init::array_init;
 use commitment_dlog::{
     commitment::{CommitmentCurve, PolyComm},
     srs::SRS,
@@ -17,7 +18,6 @@ use plonk_5_wires_protocol_dlog::{
     prover::ProverProof,
 };
 use schnorr::SignatureParams;
-use array_init::array_init;
 
 #[derive(Clone)]
 pub struct Params<G: AffineCurve> {
@@ -31,8 +31,9 @@ pub struct Randomized<G: AffineCurve> {
     pub witness: EndoScalar<G::ScalarField>,
 }
 
-pub const COUNTER_OFFSET : usize = bba_open_proof::PUBLIC_INPUT + proof_system::ZK_ROWS;
-pub const MAX_COUNTERS: usize = (1 << 10) - bba_open_proof::PUBLIC_INPUT - proof_system::ZK_ROWS - 3;
+pub const COUNTER_OFFSET: usize = bba_open_proof::PUBLIC_INPUT + proof_system::ZK_ROWS;
+pub const MAX_COUNTERS: usize =
+    (1 << 10) - bba_open_proof::PUBLIC_INPUT - proof_system::ZK_ROWS - 3;
 
 impl<G: AffineCurve> Params<G> {
     pub fn randomize(&self, p: G) -> Randomized<G> {
@@ -46,13 +47,16 @@ impl<G: AffineCurve> Params<G> {
     pub fn secret_commitment(&self, secrets: &bba_init_proof::Witness<G>) -> G {
         let lg = &self.lagrange_commitments;
         let bases = vec![self.h, lg[0], lg[2], lg[3], lg[4], lg[5], lg[6]];
-        let scalars = vec![secrets.r, secrets.c
-            , secrets.alpha[0]
-            , secrets.alpha[1]
-            , secrets.alpha[2]
-            , secrets.alpha[3]
-            , secrets.alpha[4] ];
-        let scalars : Vec<_> = scalars.iter().map(|x| x.into_repr()).collect();
+        let scalars = vec![
+            secrets.r,
+            secrets.c,
+            secrets.alpha[0],
+            secrets.alpha[1],
+            secrets.alpha[2],
+            secrets.alpha[3],
+            secrets.alpha[4],
+        ];
+        let scalars: Vec<_> = scalars.iter().map(|x| x.into_repr()).collect();
         VariableBaseMSM::multi_scalar_mul(bases.as_slice(), scalars.as_slice()).into_affine()
     }
 }
@@ -84,11 +88,11 @@ pub struct UpdateRequest<G: AffineCurve, Other: AffineCurve> {
 }
 
 // size in bytes
-pub fn proof_size<G: CommitmentCurve>(proof : &ProverProof<G>) -> usize {
-    fn poly_comm<A>(pc : &PolyComm<A>) -> usize {
+pub fn proof_size<G: CommitmentCurve>(proof: &ProverProof<G>) -> usize {
+    fn poly_comm<A>(pc: &PolyComm<A>) -> usize {
         match &pc.shifted {
             None => pc.unshifted.len(),
-            Some(_) => 1 + pc.unshifted.len()
+            Some(_) => 1 + pc.unshifted.len(),
         }
     }
 
@@ -259,7 +263,7 @@ pub fn init_secrets<G: AffineCurve>() -> bba_init_proof::Witness<G> {
     bba_init_proof::Witness {
         r: G::ScalarField::rand(rng),
         c: G::ScalarField::rand(rng),
-        alpha: array_init(|_| G::ScalarField::rand(rng))
+        alpha: array_init(|_| G::ScalarField::rand(rng)),
     }
 }
 
@@ -345,7 +349,7 @@ impl<'a, C: proof_system::Cycle> User<'a, C> {
             });
         let w = bba_open_proof::Witness {
             counters: self.state.counters.clone(),
-            alpha: self.state.alpha.clone()
+            alpha: self.state.alpha.clone(),
         };
         let proof = proof_system::prove::<C::Inner, _, EFqSponge, EFrSponge>(
             &config.prover.open_pk,
@@ -439,7 +443,9 @@ where
             &self.prover.group_map,
             None,
             vec![acc_x, acc_y],
-            |sys, p| bba_init_proof::circuit::<_, G, _>(&self.prover.init_params, &Some(secrets), sys, p),
+            |sys, p| {
+                bba_init_proof::circuit::<_, G, _>(&self.prover.init_params, &Some(secrets), sys, p)
+            },
         );
         InitRequest { acc, proof }
     }

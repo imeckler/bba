@@ -17,7 +17,7 @@ pub struct Params {
 
 pub struct Witness<F> {
     pub counters: Vec<u32>,
-    pub alpha: [F; ZK_ROWS]
+    pub alpha: [F; ZK_ROWS],
 }
 
 pub fn circuit<

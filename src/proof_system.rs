@@ -1,24 +1,15 @@
 use crate::random_oracle;
 use algebra::{
-    pasta::{
-        fp::Fp,
-        fq::Fq,
-        pallas::{Affine as Other},
-        vesta::Affine,
-    },
-    AffineCurve, BigInteger, FftField, Field, One, PrimeField, ProjectiveCurve,
-    SquareRootField, Zero,
+    pasta::{fp::Fp, fq::Fq, pallas::Affine as Other, vesta::Affine},
+    AffineCurve, BigInteger, FftField, Field, One, PrimeField, ProjectiveCurve, SquareRootField,
+    Zero,
 };
 use array_init::array_init;
 use commitment_dlog::{
     commitment::{ceil_log2, CommitmentCurve, PolyComm},
     srs::{endos, SRSSpec, SRS},
 };
-use oracle::{
-    poseidon::ArithmeticSpongeParams,
-    poseidon_5_wires::*,
-    FqSponge,
-};
+use oracle::{poseidon::ArithmeticSpongeParams, poseidon_5_wires::*, FqSponge};
 use plonk_5_wires_circuits::{
     constraints::ConstraintSystem,
     gate::{CircuitGate, GateType},

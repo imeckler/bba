@@ -1,8 +1,5 @@
 use algebra::{AffineCurve, FftField, Field, One, ProjectiveCurve};
-use commitment_dlog::{
-    commitment::CommitmentCurve,
-    srs::SRS,
-};
+use commitment_dlog::{commitment::CommitmentCurve, srs::SRS};
 use ff_fft::{
     domain::{DomainCoeff, EvaluationDomain},
     Radix2EvaluationDomain as D,

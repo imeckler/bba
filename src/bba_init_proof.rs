@@ -42,7 +42,7 @@ pub fn circuit<
         (x, y)
     };
     let len = G::ScalarField::size_in_bits();
-    let shift : G::ScalarField = shift::<G::ScalarField>(len - 1);
+    let shift: G::ScalarField = shift::<G::ScalarField>(len - 1);
     let rh = {
         let h = constant_curve_pt(sys, params.h.to_coords().unwrap());
         let r = sys.scalar(len, || (w.as_ref().unwrap().r - &shift).into_repr());
@@ -54,12 +54,12 @@ pub fn circuit<
         sys.scalar_mul(l0, c)
     };
 
-    let alpha_point = |sys : &mut Sys, i| {
-        let g : G = params.lagrange_commitments[2+i];
-        let g : (F, F) = g.to_coords().unwrap();
+    let alpha_point = |sys: &mut Sys, i| {
+        let g: G = params.lagrange_commitments[2 + i];
+        let g: (F, F) = g.to_coords().unwrap();
         let base = constant_curve_pt(sys, g);
         let alpha_i = sys.scalar(len, || {
-            let a : G::ScalarField = w.as_ref().unwrap().alpha[i] - &shift;
+            let a: G::ScalarField = w.as_ref().unwrap().alpha[i] - &shift;
             a.into_repr()
         });
         sys.scalar_mul(base, alpha_i)

@@ -5,9 +5,9 @@ use algebra::{
         pallas::{Affine as Other, PallasParameters},
         vesta::{Affine, VestaParameters},
     },
-    AffineCurve, ProjectiveCurve,
-    UniformRand,
+    AffineCurve, ProjectiveCurve, UniformRand,
 };
+use array_init::array_init;
 use commitment_dlog::{
     commitment::{ceil_log2, CommitmentCurve, PolyComm},
     srs::{endos, SRS},
@@ -17,7 +17,6 @@ use oracle::{
     poseidon_5_wires::*,
     sponge_5_wires::{DefaultFqSponge, DefaultFrSponge},
 };
-use array_init::array_init;
 
 mod bba;
 mod bba_init_proof;
@@ -231,8 +230,14 @@ fn main() {
             .unwrap();
 
         println!("------------------------------");
-        println!("Init proof size:    {} bytes", bba::proof_size(&init_request.proof));
-        println!("Update proof size:  {} bytes", bba::proof_size(&update_request.proof));
+        println!(
+            "Init proof size:    {} bytes",
+            bba::proof_size(&init_request.proof)
+        );
+        println!(
+            "Update proof size:  {} bytes",
+            bba::proof_size(&update_request.proof)
+        );
         println!("Opening proof size: {} bytes", opening_size);
     }
 }

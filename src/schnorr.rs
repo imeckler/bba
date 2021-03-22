@@ -55,7 +55,7 @@ pub trait SignatureParams {
         (r, s)
     }
 
-    fn verify(&self, pk: PublicKey<Self::G>, m: Self::Message, (r, s) : Signature<Self::G>) -> bool {
+    fn verify(&self, pk: PublicKey<Self::G>, m: Self::Message, (r, s): Signature<Self::G>) -> bool {
         let e = self.hash(pk, m, r);
         let pt = Self::G::prime_subgroup_generator().mul(s) - &pk.mul(e);
         match pt.into_affine().to_coords() {
