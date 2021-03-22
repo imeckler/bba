@@ -6,28 +6,69 @@ use algebra::{AffineCurve, ProjectiveCurve, PrimeField, FftField, SquareRootFiel
     fp::Fp}, One, Zero, UniformRand};
 use array_init::array_init;
 use crate::random_oracle;
-use commitment_dlog::{srs::{SRS, SRSSpec, endos}, commitment::{PolyComm, CommitmentField, CommitmentCurve, ceil_log2, b_poly_coefficients}};
+use commitment_dlog::{srs::{SRS, SRSSpec, endos}, commitment::{PolyComm, CommitmentCurve, ceil_log2, b_poly_coefficients}};
 use std::collections::HashMap;
 use plonk_5_wires_protocol_dlog::{plonk_sponge::{FrSponge}, prover::{ProverProof}, index::{Index}};
+
+pub type F<C> = <C as Cycle>::InnerField;
 
 pub const COLUMNS: usize = 5;
 pub const ZK_ROWS : usize = 5;
 
-/*
 pub trait Cycle 
-where
 {
-    type Outer : CommitmentCurve;
-    type Inner : CommitmentCurve<ScalarField=<<Self as Cycle>::G1 as AffineCurve>::BaseField>;
+    type InnerField : FftField + PrimeField + SquareRootField 
++ From<u128> + From<u64> + From<u32> + From<u16> + From<u8>;
+    type OuterField : FftField + PrimeField + SquareRootField
++ From<u128> + From<u64> + From<u32> + From<u16> + From<u8>;
 
-    /*
-impl<'a, G: CommitmentCurve, Other: CommitmentCurve<ScalarField=G::BaseField>> User<'a, G, Other> 
-where G::BaseField: algebra::SquareRootField + algebra::PrimeField,
-      G::ScalarField : CommitmentField,
-      G::BaseField : CommitmentField,
-      <Other as algebra::curves::AffineCurve>::Projective: std::ops::MulAssign<<G as algebra::curves::AffineCurve>::BaseField>
-      */
-} */
+    type InnerMap : groupmap::GroupMap<Self::InnerField>;
+    type OuterMap : groupmap::GroupMap<Self::OuterField>;
+
+    type InnerProj: ProjectiveCurve<Affine = Self::Inner, ScalarField = Self::OuterField, BaseField = Self::InnerField>
+        + From<Self::Inner>
+        + Into<Self::Inner>
+        + std::ops::MulAssign<Self::OuterField>;
+
+    type Inner : CommitmentCurve<Projective = Self::InnerProj, Map=Self::InnerMap, BaseField=Self::InnerField, ScalarField=Self::OuterField>
+        + From<Self::InnerProj>
+        + Into<Self::InnerProj>;
+
+    type OuterProj : ProjectiveCurve<Affine = Self::Outer, ScalarField = Self::InnerField, BaseField = Self::OuterField>
+        + From<Self::Outer>
+        + Into<Self::Outer>
+        + std::ops::MulAssign<Self::InnerField>;
+
+    type Outer : CommitmentCurve<Projective = Self::OuterProj, Map=Self::OuterMap, ScalarField=Self::InnerField, BaseField=Self::OuterField>;
+
+}
+
+pub struct FpInner;
+pub struct FqInner;
+
+impl Cycle for FpInner {
+    type InnerMap = <Other as CommitmentCurve>::Map;
+    type OuterMap = <Affine as CommitmentCurve>::Map;
+
+    type InnerField = Fp;
+    type OuterField = Fq;
+    type Inner = Other;
+    type Outer = Affine;
+    type InnerProj = <Other as AffineCurve>::Projective;
+    type OuterProj = <Affine as AffineCurve>::Projective;
+}
+
+impl Cycle for FqInner {
+    type InnerMap = <Affine as CommitmentCurve>::Map;
+    type OuterMap = <Other as CommitmentCurve>::Map;
+
+    type InnerField = Fq;
+    type OuterField = Fp;
+    type Inner = Affine;
+    type Outer = Other;
+    type InnerProj = <Affine as AffineCurve>::Projective;
+    type OuterProj = <Other as AffineCurve>::Projective;
+}
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub struct Var<F> {
@@ -546,10 +587,10 @@ pub fn prove<'a, G: CommitmentCurve, H, EFqSponge: Clone + FqSponge<G::BaseField
 (
     index: &Index<'a, G>,
     group_map: & G::Map,
+    blinders: Option<[Option<G::ScalarField>; COLUMNS]>,
     public_input: Vec<G::ScalarField>,
     main: H) -> ProverProof<G>
 where H: FnOnce(&mut WitnessGenerator<G::ScalarField>, Vec<Var<G::ScalarField>>) -> (),
-      G::ScalarField : CommitmentField,
 {
     let mut gen : WitnessGenerator<G::ScalarField> = WitnessGenerator {
         rows: public_input.iter().map(|x| array_init(|i| if i == 0 { *x } else { G::ScalarField::zero() })).collect()
@@ -558,21 +599,36 @@ where H: FnOnce(&mut WitnessGenerator<G::ScalarField>, Vec<Var<G::ScalarField>>)
     main(&mut gen, public_input.iter().map(|x| Var {index:0, value: Some(*x) }).collect());
 
     let columns = gen.columns();
+
+    let blinders : [Option<PolyComm<G::ScalarField>>; COLUMNS] =
+        match blinders {
+            None => array_init(|_| None),
+            Some(bs) => array_init(|i| {
+                bs[i].map(|b| PolyComm { unshifted:vec![b], shifted: None })
+            })
+        };
+
     ProverProof::create::<EFqSponge, EFrSponge>(
-            group_map, &columns, index, vec![]).unwrap()
+            group_map, &columns, index, vec![], blinders).unwrap()
 }
 
-pub fn generate_proving_key<'a, G>(
-    srs: &'a SRS<Affine>,
+pub fn generate_proving_key
+<'a, C: Cycle,
+    H
+    >(
+    srs: &'a SRS<C::Outer>,
+    constants: &Constants<C::InnerField>,
+    poseidon_params: &ArithmeticSpongeParams<C::OuterField>,
     public: usize,
-    main: G) -> Index<'a, Affine>
-where G: FnOnce(&mut System<Fp>, Vec<Var<Fp>>) -> ()  {
-    let mut system : System<Fp> = 
+    main: H) -> Index<'a, C::Outer>
+where H: FnOnce(&mut System<C::InnerField>, Vec<Var<C::InnerField>>) -> (),
+      {
+    let mut system : System<C::InnerField> = 
         System { 
             next_variable: 0, gates: vec![],
         };
-    let z = Fp::zero();
-    let public_input_row = vec![Fp::one(), z, z, z, z, z, z];
+    let z = C::InnerField::zero();
+    let public_input_row = vec![C::InnerField::one(), z, z, z, z, z, z];
 
     let public_input : Vec<_> = (0..public).map(|_| {
         let v = system.var(|| panic!("fail"));
@@ -595,13 +651,16 @@ where G: FnOnce(&mut System<Fp>, Vec<Var<Fp>>) -> ()  {
     main(&mut system, public_input);
 
     let gates = system.gates();
-    let (endo_q, _endo_r) = endos::<Other>();
-    Index::<Affine>::create
+    // Other base field = self scalar field
+    let (endo_q, _endo_r) = endos::<C::Inner>();
+    Index::<C::Outer>::create
     (
-        ConstraintSystem::<Fp>::create(
-            gates, oracle::pasta::fp5::params() as ArithmeticSpongeParams<Fp>, public
+        ConstraintSystem::<C::InnerField>::create(
+            gates, 
+            constants.poseidon.clone(),
+            public
         ).unwrap(),
-        oracle::pasta::fq5::params(),
+        poseidon_params.clone(),
         endo_q,
         SRSSpec::Use(&srs)
     )
@@ -612,6 +671,16 @@ pub fn fp_constants() -> Constants<Fp> {
     let base = Other::prime_subgroup_generator().to_coordinates().unwrap();
     Constants {
         poseidon: oracle::pasta::fp5::params(),
+        endo: endo_q,
+        base
+    }
+}
+
+pub fn fq_constants() -> Constants<Fq> {
+    let (endo_q, _endo_r) = endos::<Affine>();
+    let base = Affine::prime_subgroup_generator().to_coordinates().unwrap();
+    Constants {
+        poseidon: oracle::pasta::fq5::params(),
         endo: endo_q,
         base
     }

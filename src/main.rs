@@ -27,6 +27,9 @@ use schnorr::*;
 type SpongeQ = DefaultFqSponge<VestaParameters, PlonkSpongeConstants>;
 type SpongeR = DefaultFrSponge<Fp, PlonkSpongeConstants>;
 
+type PSpongeQ = DefaultFqSponge<PallasParameters, PlonkSpongeConstants>;
+type PSpongeR = DefaultFrSponge<Fq, PlonkSpongeConstants>;
+
 fn main() {
     let (_endo_q, endo_r) = endos::<Other>();
     let signer = Signer::<Other> {
@@ -41,17 +44,22 @@ fn main() {
         assert!(signer.verify(pubkey, m, s));
     }
 
-    let other_srs = SRS::<Other>::create(1 << 11);
+    let other_srs = SRS::<Other>::create(1 << ceil_log2(bba::MAX_COUNTERS));
     let srs = SRS::<Affine>::create(1 << 11);
     let group_map = <Affine as CommitmentCurve>::Map::setup();
+    let g_group_map = <Other as CommitmentCurve>::Map::setup();
 
     let proof_system_constants = fp_constants();
+    let fq_proof_system_constants = fq_constants();
 
     {
+        let start = std::time::Instant::now();
+        // Defining global parameters and performing one-time setup
+
         let brave_sk = <Other as AffineCurve>::ScalarField::rand(&mut rand_core::OsRng);
         let brave_pubkey = Other::prime_subgroup_generator().mul(brave_sk).into_affine();
 
-        let bba = time("BBA parameter precomputation", || bba::Params::new(&other_srs, endo_r));
+        let bba = bba::Params::new(&other_srs, endo_r);
 
         let h = other_srs.h.to_coordinates().unwrap();
         let init_params = bba_init_proof::Params {
@@ -64,19 +72,38 @@ fn main() {
             h,
         };
 
-        let init_pk = generate_proving_key(&srs, 2, |sys, p| {
+        let fq_poseidon = oracle::pasta::fq5::params();
+        let fp_poseidon = oracle::pasta::fp5::params();
+
+        let init_pk = generate_proving_key::<FpInner, _>(&srs, &proof_system_constants, &fq_poseidon, 2, |sys, p| {
             bba_init_proof::circuit::<_, Other, _>(&init_params, &None, sys, p)
         });
         let init_vk = init_pk.verifier_index();
 
-        let update_pk = generate_proving_key(&srs, 2, |sys, p| {
+        let update_pk = generate_proving_key::<FpInner, _>(&srs, &proof_system_constants, &fq_poseidon, 2, |sys, p| {
             bba_update_proof::circuit::<_, Other, _>(&proof_system_constants, &update_params, &None, sys, p)
         });
         let update_vk = update_pk.verifier_index();
 
-        let other_lgr_comms : Vec<PolyComm<Affine>> = time("lagrange commitment precomputation", ||
+        let open_params = bba_open_proof::Params {
+            // The public vector of prices-per-view for the campaigns
+            prices: (0..bba::MAX_COUNTERS).map(|i| {
+                let i = i as u32;
+                i * i + 1
+            }).collect()
+        };
+
+        let open_pk = generate_proving_key::<FqInner, _>(&other_srs, &fq_proof_system_constants, &fp_poseidon, 2, |sys, p| {
+            bba_open_proof::circuit::<_, Affine, _>(&open_params, &None, sys, p)
+        });
+        let open_vk = open_pk.verifier_index();
+
+        let other_lgr_comms : Vec<PolyComm<Affine>> =
             fft::lagrange_commitments(&srs).iter()
-            .map(|g| PolyComm { unshifted: vec![*g], shifted: None }).collect());
+            .map(|g| PolyComm { unshifted: vec![*g], shifted: None }).collect();
+
+        // End of setup
+        println!("Parameter precomputation (one time cost) ({:?})", start.elapsed());
 
         // The value representing the state of the update authority (e.g., Brave)
         let update_authority = bba::UpdateAuthority {
@@ -95,6 +122,9 @@ fn main() {
             authority_public_key: brave_pubkey,
             prover: bba::UserProver {
                 group_map: group_map.clone(),
+                g_group_map: g_group_map.clone(),
+                open_pk,
+                open_params: open_params.clone(),
                 proof_system_constants: proof_system_constants.clone(),
                 init_params: init_params.clone(),
                 update_params: update_params.clone(),
@@ -105,58 +135,29 @@ fn main() {
 
         // First, the user requests an initial BBA from the authority
         let init_secrets = bba::init_secrets();
-        let init_request = user_config.request_init::<SpongeQ, SpongeR>(init_secrets);
-        let init_signature = update_authority.perform_init::<SpongeQ, SpongeR>(init_request).unwrap();
+        let init_request = time("User: Create BBA init request", ||
+            user_config.request_init::<SpongeQ, SpongeR>(init_secrets));
+        let init_signature = time("Authority: Sign initial accumulator", ||
+                                  update_authority.perform_init::<SpongeQ, SpongeR>(init_request).unwrap());
+        let mut user = bba::User::<FpInner>::init(user_config, init_secrets, init_signature).unwrap();
+        user.check_invariant();
+
+        // Then, the user can request to perform an update by incrementing views in some campaigns
+        let updates = (0..1000).map(|i| {
+            bba::SingleUpdate { campaign_index: i, delta: 10 * (i + 1) }
+        }).collect();
+        let update_requeest = time("User: Create BBA update request", || user.request_update::<SpongeQ, SpongeR>(updates));
+        let resp = time("Authority: Update BBA", || update_authority.perform_updates::<SpongeQ, SpongeR>(vec![update_requeest.clone()])[0].as_ref().unwrap().clone());
+        time("User: Process update response", || user.process_update_response(&update_requeest.updates, &resp));
+
+        // Now, the user can open their BBA to a reward in a zero-knowledge way
+        let opening = time("User: Open BBA", || user.open::<PSpongeQ, PSpongeR>());
+        // Finally, we can verify the correctness of the opening
+        let _payout = opening.verify::<PSpongeQ, PSpongeR>(
+            &signer,
+            &bba,
+            brave_pubkey,
+            &g_group_map,
+            &open_vk).unwrap();
     }
-
-    /*
-    {
-        let brave_sk = <Other as AffineCurve>::ScalarField::rand(&mut rand_core::OsRng);
-        let brave_pubkey = Other::prime_subgroup_generator().mul(brave_sk).into_affine().to_coordinates().unwrap();
-
-        let bba = time("BBA parameter precomputation", || bba::Params::new(&other_srs, endo_r));
-
-        let params = bba_update_proof::Params {
-            brave_pubkey, 
-            h: other_srs.h.to_coordinates().unwrap()
-        };
-
-        let index = generate_proving_key(&srs, 2, |sys, p| {
-            bba_update_proof::circuit::<_, Other, _>(&constants, &params, &None, sys, p)
-        });
-        let verifier_index = index.verifier_index();
-
-        // Dummy accumulator
-        let acc = Other::prime_subgroup_generator().mul(Fq::rand(&mut rand_core::OsRng)).into_affine();
-        let signature = signer.sign(brave_sk, acc);
-
-        let bba::Randomized { result: new_acc, witness:endo::EndoScalar(r) } = bba.randomize(acc);
-
-        let witness = bba_update_proof::Witness {
-            acc,
-            signature,
-            r
-        };
-
-        let new_acc = new_acc.to_coordinates().unwrap();
-
-        // a + 2^{n - 1}
-        let proof = time("proving time", ||
-            prove(&index, &group_map, vec![new_acc.0, new_acc.1], |sys, p| {
-                bba_update_proof::circuit(&constants, &params, &Some(witness), sys, p)
-            }));
-
-        let lgr_comms : Vec<PolyComm<Affine>> =
-            fft::lagrange_commitments(&srs).iter()
-            .map(|g| PolyComm { unshifted: vec![*g], shifted: None }).collect();
-
-        let num_proofs = 100;
-
-        let _ = time("verify 100 proofs", || {
-            let proofs = vec![(&verifier_index, &lgr_comms, &proof); num_proofs];
-            assert!(
-                ProverProof::verify::<DefaultFqSponge<VestaParameters, PlonkSpongeConstants>, DefaultFrSponge<Fp, PlonkSpongeConstants>>
-                (&group_map, &proofs).unwrap());
-        });
-    } */
 }

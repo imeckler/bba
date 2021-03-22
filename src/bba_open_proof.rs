@@ -10,19 +10,18 @@ use crate::bba;
 pub const PUBLIC_INPUT : usize = 2;
 
 // Parameters for the update proof circuit.
+#[derive(Clone)]
 pub struct Params {
     pub prices: Vec<u32>,
 }
 
-pub struct Witness<G: AffineCurve> {
+pub struct Witness {
     pub counters: Vec<u32>,
-    pub c: G::ScalarField
 }
 
 pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + CoordinateCurve, Sys: Cs<F>>(
-    constants: &Constants<F>,
     params: &Params,
-    w: &Option<Witness<G>>,
+    w: &Option<Witness>,
     sys: &mut Sys,
     public_input: Vec<Var<F>>,
 ) {
@@ -48,9 +47,10 @@ pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + Coordinat
         let row = [ sys.var(|| counter(i)), acc, new_acc, sys.var(|| F::zero()), sys.var(|| F::zero()) ];
         sys.gate(GateSpec {
             typ: GateType::Generic,
-            row: row0,
+            row: row,
             c: vec![price(i), F::one(), -F::one(),F::zero(),F::zero(),F::zero(),F::zero(),],
         });
+        acc = new_acc;
     }
 
     for _ in 0..ZK_ROWS {
@@ -61,9 +61,14 @@ pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + Coordinat
                 sys.var(|| F::rand(&mut rand_core::OsRng))
             }
         });
+        // constrain first column to 0
         sys.gate(GateSpec {
-            typ: GateType::Zero,
-            c: vec![],
+            typ: GateType::Generic,
+            c: vec![F::one(), 
+            F::zero(), F::zero(),
+            F::zero(), F::zero(),
+            F::zero(), F::zero(),
+            ],
             row
         });
     }
