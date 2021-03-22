@@ -1,8 +1,14 @@
-use std::ops::{MulAssign};
+use algebra::{AffineCurve, FftField, Field, One, ProjectiveCurve};
+use commitment_dlog::{
+    commitment::CommitmentCurve,
+    srs::SRS,
+};
+use ff_fft::{
+    domain::{DomainCoeff, EvaluationDomain},
+    Radix2EvaluationDomain as D,
+};
 use rayon::prelude::*;
-use algebra::{Field, FftField, One, AffineCurve, ProjectiveCurve, UniformRand};
-use ff_fft::{domain::{EvaluationDomain, DomainCoeff}, Radix2EvaluationDomain as D};
-use commitment_dlog::{srs::{SRS, SRSSpec, endos}, commitment::{CommitmentCurve, ceil_log2, b_poly_coefficients}};
+use std::ops::MulAssign;
 
 #[inline]
 fn bitreverse(mut n: u32, l: u32) -> u32 {
@@ -117,39 +123,23 @@ pub fn serial_group_fft<G: ProjectiveCurve>(a: &mut [G], omega: G::ScalarField, 
     }
 }
 
-pub fn group_fft<G: ProjectiveCurve>(
-    a: &mut [G], omega: G::ScalarField, log_n: u32) {
-    best_fft(
-        a,
-        omega,
-        log_n,
-        serial_group_fft::<G>)
+pub fn group_fft<G: ProjectiveCurve>(a: &mut [G], omega: G::ScalarField, log_n: u32) {
+    best_fft(a, omega, log_n, serial_group_fft::<G>)
 }
 
-pub fn lagrange_commitments_slow<G: CommitmentCurve>(srs : &SRS<G>) -> Vec<G> 
-where <G as AffineCurve>::ScalarField : commitment_dlog::CommitmentField
-{
-    use algebra::Zero;
-    use ff_fft::Evaluations;
-    const PUBLIC : usize = 10;
+pub fn lagrange_commitments<G: CommitmentCurve>(srs: &SRS<G>) -> Vec<G> {
+    let mut lg: Vec<<G as AffineCurve>::Projective> =
+        srs.g.iter().map(|g| g.into_projective()).collect();
     let domain = <D<G::ScalarField> as EvaluationDomain<_>>::new(srs.g.len()).unwrap();
-    let lgr_comms : Vec<_> = (0..PUBLIC).map(|i| {
-        let mut v = vec![G::ScalarField::zero(); i + 1];
-        v[i] = G::ScalarField::one();
+    group_fft::<<G as AffineCurve>::Projective>(
+        lg.as_mut_slice(),
+        domain.group_gen_inv,
+        domain.log_size_of_group,
+    );
 
-        let p = Evaluations::<G::ScalarField, D<G::ScalarField>>::from_vec_and_domain(
-            v, domain).interpolate();
-        srs.commit_non_hiding(&p, None).unshifted[0]
-    }).collect();
-    lgr_comms
-}
-
-pub fn lagrange_commitments<G: CommitmentCurve>(srs : &SRS<G>) -> Vec<G> {
-    let mut lg : Vec<<G as AffineCurve>::Projective> = srs.g.iter().map(|g| g.into_projective()).collect();
-    let domain = <D<G::ScalarField> as EvaluationDomain<_>>::new(srs.g.len()).unwrap();
-    group_fft::<<G as AffineCurve>::Projective>(lg.as_mut_slice(), domain.group_gen_inv, domain.log_size_of_group);
-
-    let n_inv = <G::ScalarField as From<u64>>::from(domain.size() as u64).inverse().unwrap();
+    let n_inv = <G::ScalarField as From<u64>>::from(domain.size() as u64)
+        .inverse()
+        .unwrap();
     lg.par_iter_mut().for_each(|g| {
         *g *= n_inv;
     });

@@ -1,15 +1,15 @@
-use algebra::{ProjectiveCurve, AffineCurve, BigInteger, PrimeField, UniformRand, Zero};
-use commitment_dlog::commitment::CommitmentCurve;
-use oracle::{poseidon_5_wires::*, poseidon::ArithmeticSpongeParams};
+use algebra::{AffineCurve, BigInteger, PrimeField, ProjectiveCurve, UniformRand, Zero};
 use array_init::array_init;
+use commitment_dlog::commitment::CommitmentCurve;
+use oracle::{poseidon::ArithmeticSpongeParams, poseidon_5_wires::*};
 
 use crate::{endo, random_oracle};
 
-pub trait CoordinateCurve : AffineCurve {
+pub trait CoordinateCurve: AffineCurve {
     fn to_coords(&self) -> Option<(Self::BaseField, Self::BaseField)>;
 }
 
-impl<G : CommitmentCurve> CoordinateCurve for G {
+impl<G: CommitmentCurve> CoordinateCurve for G {
     fn to_coords(&self) -> Option<(Self::BaseField, Self::BaseField)> {
         CommitmentCurve::to_coordinates(self)
     }
@@ -18,32 +18,35 @@ impl<G : CommitmentCurve> CoordinateCurve for G {
 pub type PrivateKey<G> = <G as AffineCurve>::ScalarField;
 pub type PublicKey<G> = G;
 
-pub type Signature<G> = (<G as AffineCurve>::BaseField, <G as AffineCurve>::ScalarField);
+pub type Signature<G> = (
+    <G as AffineCurve>::BaseField,
+    <G as AffineCurve>::ScalarField,
+);
 
-fn even<F : PrimeField>(x: F) -> bool {
+fn even<F: PrimeField>(x: F) -> bool {
     let bits = x.into_repr().to_bits();
-    ! bits[bits.len() - 1]
+    !bits[bits.len() - 1]
 }
 
 pub trait SignatureParams {
-    type BaseField : PrimeField;
-    type G : CoordinateCurve<BaseField = Self::BaseField>;
+    type BaseField: PrimeField;
+    type G: CoordinateCurve<BaseField = Self::BaseField>;
     type Message;
 
-    fn hash(&self, pk: PublicKey<Self::G>, m: Self::Message, r: <Self::G as AffineCurve>::BaseField) -> <Self::G as AffineCurve>::ScalarField;
- 
+    fn hash(
+        &self,
+        pk: PublicKey<Self::G>,
+        m: Self::Message,
+        r: <Self::G as AffineCurve>::BaseField,
+    ) -> <Self::G as AffineCurve>::ScalarField;
+
     fn sign(&self, d: PrivateKey<Self::G>, m: Self::Message) -> Signature<Self::G> {
         let base = Self::G::prime_subgroup_generator();
         let pubkey = base.mul(d).into_affine();
         let (r, k) = {
             let k_prime = <Self::G as AffineCurve>::ScalarField::rand(&mut rand_core::OsRng);
             let (r, ry) = base.mul(k_prime).into_affine().to_coords().unwrap();
-            let k = 
-                if even(ry) {
-                    k_prime
-                } else {
-                    -k_prime
-                };
+            let k = if even(ry) { k_prime } else { -k_prime };
             (r, k)
         };
 
@@ -57,7 +60,7 @@ pub trait SignatureParams {
         let pt = Self::G::prime_subgroup_generator().mul(s) - &pk.mul(e);
         match pt.into_affine().to_coords() {
             None => false,
-            Some((rx, ry)) => even(ry) && rx == r
+            Some((rx, ry)) => even(ry) && rx == r,
         }
     }
 }
@@ -79,23 +82,30 @@ fn pack<B: BigInteger>(limbs_lsb: &[u64]) -> B {
     res
 }
 
-impl<G : CoordinateCurve> SignatureParams for Signer<G> where G::BaseField : PrimeField {
+impl<G: CoordinateCurve> SignatureParams for Signer<G>
+where
+    G::BaseField: PrimeField,
+{
     type BaseField = G::BaseField;
     type G = G;
     type Message = G;
 
-    fn hash(&self, _pk: PublicKey<G>, m : G, r: G::BaseField) -> G::ScalarField {
+    fn hash(&self, _pk: PublicKey<G>, m: G, r: G::BaseField) -> G::ScalarField {
         let (x, y) = m.to_coords().unwrap();
-        let input = [ x, y, r, G::BaseField::zero(), G::BaseField::zero() ];
+        let input = [x, y, r, G::BaseField::zero(), G::BaseField::zero()];
         let res = (0..random_oracle::POSEIDON_ROUNDS).fold(input, |prev, round| {
             let rc = &self.sponge.round_constants[round];
-            let s : [_; COLUMNS] = array_init(|j| sbox::<_, PlonkSpongeConstants>(prev[j]));
+            let s: [_; COLUMNS] = array_init(|j| sbox::<_, PlonkSpongeConstants>(prev[j]));
             array_init(|i| {
                 let m = &self.sponge.mds[i];
-                rc[i] + &s.iter().zip(m.iter()).fold(G::BaseField::zero(), |x, (s, &m)| m * s + x)
+                rc[i]
+                    + &s.iter()
+                        .zip(m.iter())
+                        .fold(G::BaseField::zero(), |x, (s, &m)| m * s + x)
             })
         });
 
-        endo::EndoScalar(G::ScalarField::from_repr(pack(res[0].into_repr().as_ref()))).to_field(&self.endo)
+        endo::EndoScalar(G::ScalarField::from_repr(pack(res[0].into_repr().as_ref())))
+            .to_field(&self.endo)
     }
 }

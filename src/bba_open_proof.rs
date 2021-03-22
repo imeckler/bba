@@ -1,13 +1,13 @@
-use array_init::array_init;
-use algebra::{AffineCurve, PrimeField, FftField};
-use plonk_5_wires_circuits::gate::{GateType};
+use crate::bba;
 use crate::proof_system::*;
 use crate::schnorr;
+use algebra::{AffineCurve, FftField, PrimeField};
+use array_init::array_init;
+use plonk_5_wires_circuits::gate::GateType;
 use schnorr::CoordinateCurve;
-use crate::bba;
 
 // c, total value
-pub const PUBLIC_INPUT : usize = 2;
+pub const PUBLIC_INPUT: usize = 2;
 
 // Parameters for the update proof circuit.
 #[derive(Clone)]
@@ -19,7 +19,11 @@ pub struct Witness {
     pub counters: Vec<u32>,
 }
 
-pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + CoordinateCurve, Sys: Cs<F>>(
+pub fn circuit<
+    F: PrimeField + FftField,
+    G: AffineCurve<BaseField = F> + CoordinateCurve,
+    Sys: Cs<F>,
+>(
     params: &Params,
     w: &Option<Witness>,
     sys: &mut Sys,
@@ -27,28 +31,53 @@ pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + Coordinat
 ) {
     let counter = |i| F::from(w.as_ref().unwrap().counters[i] as u64);
     let price = |i| F::from(params.prices[i] as u64);
-    let mut acc = sys.var(|| {
-        counter(0) * price(0)
-    });
-    let row0 = [ sys.var(|| counter(0)), acc, sys.var(|| F::zero()), sys.var(|| F::zero()), sys.var(|| F::zero())];
+    let mut acc = sys.var(|| counter(0) * price(0));
+    let row0 = [
+        sys.var(|| counter(0)),
+        acc,
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+    ];
     sys.gate(GateSpec {
         typ: GateType::Generic,
         row: row0,
-        c: vec![price(0), -F::one(), F::zero(),F::zero(),F::zero(),F::zero(),F::zero(),],
+        c: vec![
+            price(0),
+            -F::one(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+            F::zero(),
+        ],
     });
 
     for i in 1..bba::MAX_COUNTERS {
-        let new_acc =
-            if i == bba::MAX_COUNTERS - 1 {
-                public_input[1]
-            } else {
-                sys.var(|| acc.val() + counter(i) * price(i))
-            };
-        let row = [ sys.var(|| counter(i)), acc, new_acc, sys.var(|| F::zero()), sys.var(|| F::zero()) ];
+        let new_acc = if i == bba::MAX_COUNTERS - 1 {
+            public_input[1]
+        } else {
+            sys.var(|| acc.val() + counter(i) * price(i))
+        };
+        let row = [
+            sys.var(|| counter(i)),
+            acc,
+            new_acc,
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+        ];
         sys.gate(GateSpec {
             typ: GateType::Generic,
             row: row,
-            c: vec![price(i), F::one(), -F::one(),F::zero(),F::zero(),F::zero(),F::zero(),],
+            c: vec![
+                price(i),
+                F::one(),
+                -F::one(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+            ],
         });
         acc = new_acc;
     }
@@ -64,12 +93,16 @@ pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + Coordinat
         // constrain first column to 0
         sys.gate(GateSpec {
             typ: GateType::Generic,
-            c: vec![F::one(), 
-            F::zero(), F::zero(),
-            F::zero(), F::zero(),
-            F::zero(), F::zero(),
+            c: vec![
+                F::one(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
             ],
-            row
+            row,
         });
     }
 }

@@ -1,6 +1,6 @@
-use algebra::{AffineCurve, PrimeField, FftField};
 use crate::proof_system::*;
 use crate::schnorr;
+use algebra::{AffineCurve, FftField, PrimeField};
 use schnorr::CoordinateCurve;
 
 // Proof spec:
@@ -12,7 +12,7 @@ use schnorr::CoordinateCurve;
 #[derive(Copy, Clone)]
 pub struct Params<F> {
     pub l0: (F, F),
-    pub h: (F, F)
+    pub h: (F, F),
 }
 
 #[derive(Copy, Clone)]
@@ -21,13 +21,17 @@ pub struct Witness<G: AffineCurve> {
     pub c: G::ScalarField,
 }
 
-pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + CoordinateCurve, Sys: Cs<F>>(
+pub fn circuit<
+    F: PrimeField + FftField,
+    G: AffineCurve<BaseField = F> + CoordinateCurve,
+    Sys: Cs<F>,
+>(
     params: &Params<F>,
     w: &Option<Witness<G>>,
     sys: &mut Sys,
     public_input: Vec<Var<F>>,
 ) {
-    let constant_curve_pt = |sys : &mut Sys, (x, y)| {
+    let constant_curve_pt = |sys: &mut Sys, (x, y)| {
         let x = sys.constant(x);
         let y = sys.constant(y);
         (x, y)
@@ -38,7 +42,7 @@ pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + Coordinat
         let h = constant_curve_pt(sys, params.h);
         let r = sys.scalar(len, || (w.as_ref().unwrap().r - &shift).into_repr());
         sys.scalar_mul(h, r)
-    }; 
+    };
     let cl0 = {
         let l0 = constant_curve_pt(sys, params.l0);
         let c = sys.scalar(len, || (w.as_ref().unwrap().c - &shift).into_repr());

@@ -1,20 +1,20 @@
-use algebra::{AffineCurve, PrimeField, FftField};
 use crate::proof_system::*;
 use crate::schnorr;
+use algebra::{AffineCurve, FftField, PrimeField};
 use schnorr::CoordinateCurve;
 
 // Parameters for the update proof circuit.
 #[derive(Copy, Clone)]
 pub struct Params<F> {
     pub brave_pubkey: (F, F),
-    pub h: (F, F)
+    pub h: (F, F),
 }
 
 #[derive(Copy, Clone)]
 pub struct Witness<G: AffineCurve> {
     pub signature: schnorr::Signature<G>,
     pub acc: G,
-    pub r: G::ScalarField
+    pub r: G::ScalarField,
 }
 
 // Public input:
@@ -23,14 +23,18 @@ pub struct Witness<G: AffineCurve> {
 // I know [acc: curve_point] and [s : signature] such that
 // the signature verifies against Brave's public key and [new_acc] is
 // a re-randomization of [acc]
-pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + CoordinateCurve, Sys: Cs<F>>(
+pub fn circuit<
+    F: PrimeField + FftField,
+    G: AffineCurve<BaseField = F> + CoordinateCurve,
+    Sys: Cs<F>,
+>(
     constants: &Constants<F>,
     params: &Params<F>,
     w: &Option<Witness<G>>,
     sys: &mut Sys,
     public_input: Vec<Var<F>>,
 ) {
-    let constant_curve_pt = |sys : &mut Sys, (x, y)| {
+    let constant_curve_pt = |sys: &mut Sys, (x, y)| {
         let x = sys.constant(x);
         let y = sys.constant(y);
         (x, y)
@@ -56,7 +60,7 @@ pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + Coordinat
         let zero = sys.constant(F::zero());
         let r = sys.var(|| w.as_ref().unwrap().signature.0);
         let e = {
-            let input = [ prev_acc.0, prev_acc.1, r, zero, zero ];
+            let input = [prev_acc.0, prev_acc.1, r, zero, zero];
             let e = sys.poseidon(constants, input)[0];
             let e_bits = sys.scalar(256, || e.val().into_repr());
             sys.assert_pack(e, &e_bits);
@@ -80,15 +84,13 @@ pub fn circuit<F: PrimeField + FftField, G: AffineCurve<BaseField=F> + Coordinat
         };
         // optimization: Could save a constraint in constraining y to be even
         let ry_bits = {
-            let bs = sys.scalar(256, || {
-                ry.val().into_repr()
-            });
+            let bs = sys.scalar(256, || ry.val().into_repr());
             sys.assert_pack(ry, &bs);
             bs
         };
         sys.assert_eq(zero, ry_bits[0]);
         sys.assert_eq(rx, r);
     }
-    sys.assert_add_group(mask, prev_acc, (public_input[0], public_input[1]) );
+    sys.assert_add_group(mask, prev_acc, (public_input[0], public_input[1]));
     sys.zk()
 }
