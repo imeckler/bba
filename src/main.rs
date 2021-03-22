@@ -206,7 +206,7 @@ fn main() {
                 delta: 10 * (i + 1),
             })
             .collect();
-        let update_request = time("User:      Create BBA update request", || {
+        let update_request = time("User:      Create BBA update request [1000 counters updated]", || {
             user.request_update::<SpongeQ, SpongeR>(updates)
         });
 

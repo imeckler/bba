@@ -31,7 +31,7 @@ Parameter precomputation (one time cost) (2.432729801s)
 
 User:      Create BBA init request (653.064071ms)
 Authority: Verify and sign initial accumulator (11.527393ms)
-User:      Create BBA update request (362.221627ms)
+User:      Create BBA update request [1000 counters updated] (362.221627ms)
 Authority: Update BBA (7.979831ms)
 User:      Process update response (1.005992ms)
 User:      Open BBA (157.451082ms)
