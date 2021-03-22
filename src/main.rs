@@ -141,7 +141,7 @@ fn main() {
 
         // End of setup
         println!(
-            "Parameter precomputation (one time cost) ({:?})",
+            "Parameter precomputation (one time cost) ({:?})\n",
             start.elapsed()
         );
 
@@ -175,17 +175,19 @@ fn main() {
 
         // First, the user requests an initial BBA from the authority
         let init_secrets = bba::init_secrets();
-        let init_request = time("User: Create BBA init request", || {
+        let init_request = time("User:      Create BBA init request", || {
             user_config.request_init::<SpongeQ, SpongeR>(init_secrets)
         });
+
+        // Then, the authority responds with an initial BBA.
         let init_signature = time("Authority: Sign initial accumulator", || {
             update_authority
-                .perform_init::<SpongeQ, SpongeR>(init_request)
+                .perform_init::<SpongeQ, SpongeR>(init_request.clone())
                 .unwrap()
         });
+
         let mut user =
             bba::User::<FpInner>::init(user_config, init_secrets, init_signature).unwrap();
-        user.check_invariant();
 
         // Then, the user can request to perform an update by incrementing views in some campaigns
         let updates = (0..1000)
@@ -194,24 +196,32 @@ fn main() {
                 delta: 10 * (i + 1),
             })
             .collect();
-        let update_requeest = time("User: Create BBA update request", || {
+        let update_request = time("User:      Create BBA update request", || {
             user.request_update::<SpongeQ, SpongeR>(updates)
         });
+
+        // and the authority can validate the unlinkable update request and provide an updated BBA
         let resp = time("Authority: Update BBA", || {
-            update_authority.perform_updates::<SpongeQ, SpongeR>(vec![update_requeest.clone()])[0]
+            update_authority.perform_updates::<SpongeQ, SpongeR>(vec![update_request.clone()])[0]
                 .as_ref()
                 .unwrap()
                 .clone()
         });
-        time("User: Process update response", || {
-            user.process_update_response(&update_requeest.updates, &resp)
+        time("User:      Process update response", || {
+            user.process_update_response(&update_request.updates, &resp)
         });
 
         // Now, the user can open their BBA to a reward in a zero-knowledge way
-        let opening = time("User: Open BBA", || user.open::<PSpongeQ, PSpongeR>());
+        let opening = time("User:      Open BBA", || user.open::<PSpongeQ, PSpongeR>());
+        let opening_size = bba::proof_size(&opening.proof);
         // Finally, we can verify the correctness of the opening
         let _payout = opening
             .verify::<PSpongeQ, PSpongeR>(&signer, &bba, brave_pubkey, &g_group_map, &open_vk)
             .unwrap();
+
+        println!("------------------------------");
+        println!("Init proof size:    {} bytes", bba::proof_size(&init_request.proof));
+        println!("Update proof size:  {} bytes", bba::proof_size(&update_request.proof));
+        println!("Opening proof size: {} bytes", opening_size);
     }
 }

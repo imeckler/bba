@@ -55,7 +55,7 @@ pub struct InitRequest<G: AffineCurve, Other: AffineCurve> {
     // A proof of:
     // I know r, c such that acc = r * H + c * L.
     // Could be replaced with a specialized schnorr proof for increased efficiency
-    proof: ProverProof<Other>,
+    pub proof: ProverProof<Other>,
 }
 
 // The request sent by a user to the server to get a signed, updated BBA
@@ -64,8 +64,46 @@ pub struct UpdateRequest<G: AffineCurve, Other: AffineCurve> {
     pub updates: Vec<SingleUpdate>,
     // A proof of:
     // I know a valid signature on a value [acc], and [r] such that [acc = r H]
-    proof: ProverProof<Other>,
+    pub proof: ProverProof<Other>,
     randomized_acc: G,
+}
+
+// size in bytes
+pub fn proof_size<G: CommitmentCurve>(proof : &ProverProof<G>) -> usize {
+    fn poly_comm<A>(pc : &PolyComm<A>) -> usize {
+        match &pc.shifted {
+            None => pc.unshifted.len(),
+            Some(_) => 1 + pc.unshifted.len()
+        }
+    }
+
+    let mut group_elt_count = 0;
+    let mut field_elt_count = 0;
+    group_elt_count += poly_comm(&proof.commitments.z_comm);
+    group_elt_count += poly_comm(&proof.commitments.t_comm);
+    for w in proof.commitments.w_comm.iter() {
+        group_elt_count += poly_comm(w);
+    }
+
+    // opening proof
+    group_elt_count += 2;
+    group_elt_count += proof.proof.lr.len() * 2;
+    field_elt_count += 2;
+
+    // evaluations
+    for e in proof.evals.iter() {
+        field_elt_count += e.z.len();
+        field_elt_count += e.t.len();
+        field_elt_count += e.f.len();
+        for v in e.w.iter() {
+            field_elt_count += v.len();
+        }
+        for v in e.s.iter() {
+            field_elt_count += v.len();
+        }
+    }
+
+    32 * (group_elt_count + field_elt_count) + ((group_elt_count + 7) / 8)
 }
 
 // No need to send the actual updated accumulator as the user can compute
