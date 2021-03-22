@@ -23,3 +23,20 @@ rustup default 1.45.2
 ```
 cargo run --release
 ```
+
+You should see some output of the form
+
+```
+Parameter precomputation (one time cost) (1.19676451s)
+
+User:      Create BBA init request (355.117783ms)
+Authority: Sign initial accumulator (9.09117ms)
+User:      Create BBA update request (371.558624ms)
+Authority: Update BBA (8.05528ms)
+User:      Process update response (1.015943ms)
+User:      Open BBA (156.687137ms)
+------------------------------
+Init proof size:    2245 bytes
+Update proof size:  2437 bytes
+Opening proof size: 2181 bytes
+```
