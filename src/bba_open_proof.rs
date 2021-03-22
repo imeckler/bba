@@ -15,8 +15,9 @@ pub struct Params {
     pub prices: Vec<u32>,
 }
 
-pub struct Witness {
+pub struct Witness<F> {
     pub counters: Vec<u32>,
+    pub alpha: [F; ZK_ROWS]
 }
 
 pub fn circuit<
@@ -25,10 +26,34 @@ pub fn circuit<
     Sys: Cs<F>,
 >(
     params: &Params,
-    w: &Option<Witness>,
+    w: &Option<Witness<F>>,
     sys: &mut Sys,
     public_input: Vec<Var<F>>,
 ) {
+    for r in 0..ZK_ROWS {
+        let row = array_init(|i| {
+            if i == 0 {
+                sys.var(|| w.as_ref().unwrap().alpha[r])
+            } else {
+                sys.var(|| F::rand(&mut rand_core::OsRng))
+            }
+        });
+
+        sys.gate(GateSpec {
+            typ: GateType::Generic,
+            c: vec![
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+                F::zero(),
+            ],
+            row,
+        });
+    }
+
     let counter = |i| F::from(w.as_ref().unwrap().counters[i] as u64);
     let price = |i| F::from(params.prices[i] as u64);
     let mut acc = sys.var(|| counter(0) * price(0));
@@ -80,29 +105,5 @@ pub fn circuit<
             ],
         });
         acc = new_acc;
-    }
-
-    for _ in 0..ZK_ROWS {
-        let row = array_init(|i| {
-            if i == 0 {
-                sys.var(|| F::zero())
-            } else {
-                sys.var(|| F::rand(&mut rand_core::OsRng))
-            }
-        });
-        // constrain first column to 0
-        sys.gate(GateSpec {
-            typ: GateType::Generic,
-            c: vec![
-                F::one(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-            ],
-            row,
-        });
     }
 }

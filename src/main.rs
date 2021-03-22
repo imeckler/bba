@@ -17,6 +17,7 @@ use oracle::{
     poseidon_5_wires::*,
     sponge_5_wires::{DefaultFqSponge, DefaultFrSponge},
 };
+use array_init::array_init;
 
 mod bba;
 mod bba_init_proof;
@@ -55,6 +56,7 @@ fn main() {
 
     let other_srs = SRS::<Other>::create(1 << ceil_log2(bba::MAX_COUNTERS));
     let srs = SRS::<Affine>::create(1 << 11);
+    let big_srs = SRS::<Affine>::create(1 << 12);
     let group_map = <Affine as CommitmentCurve>::Map::setup();
     let g_group_map = <Other as CommitmentCurve>::Map::setup();
 
@@ -72,12 +74,12 @@ fn main() {
 
         let bba = bba::Params::new(&other_srs, endo_r);
 
-        let h = other_srs.h.to_coordinates().unwrap();
         let init_params = bba_init_proof::Params {
-            l0: bba.lagrange_commitments[0].to_coordinates().unwrap(),
-            h,
+            lagrange_commitments: array_init(|i| bba.lagrange_commitments[i]),
+            h: other_srs.h,
         };
 
+        let h = other_srs.h.to_coordinates().unwrap();
         let update_params = bba_update_proof::Params {
             brave_pubkey: brave_pubkey.to_coordinates().unwrap(),
             h,
@@ -87,7 +89,7 @@ fn main() {
         let fp_poseidon = oracle::pasta::fp5::params();
 
         let init_pk = generate_proving_key::<FpInner, _>(
-            &srs,
+            &big_srs,
             &proof_system_constants,
             &fq_poseidon,
             2,
@@ -139,6 +141,14 @@ fn main() {
             })
             .collect();
 
+        let big_other_lgr_comms: Vec<PolyComm<Affine>> = fft::lagrange_commitments(&big_srs)
+            .iter()
+            .map(|g| PolyComm {
+                unshifted: vec![*g],
+                shifted: None,
+            })
+            .collect();
+
         // End of setup
         println!(
             "Parameter precomputation (one time cost) ({:?})\n",
@@ -152,6 +162,7 @@ fn main() {
             group_map: group_map.clone(),
             init_vk,
             other_lgr_comms,
+            big_other_lgr_comms,
             lgr_comms: bba.lagrange_commitments.clone(),
             update_vk,
         };
@@ -180,7 +191,7 @@ fn main() {
         });
 
         // Then, the authority responds with an initial BBA.
-        let init_signature = time("Authority: Sign initial accumulator", || {
+        let init_signature = time("Authority: Verify and sign initial accumulator", || {
             update_authority
                 .perform_init::<SpongeQ, SpongeR>(init_request.clone())
                 .unwrap()

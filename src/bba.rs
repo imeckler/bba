@@ -17,6 +17,7 @@ use plonk_5_wires_protocol_dlog::{
     prover::ProverProof,
 };
 use schnorr::SignatureParams;
+use array_init::array_init;
 
 #[derive(Clone)]
 pub struct Params<G: AffineCurve> {
@@ -30,7 +31,8 @@ pub struct Randomized<G: AffineCurve> {
     pub witness: EndoScalar<G::ScalarField>,
 }
 
-pub const MAX_COUNTERS: usize = (1 << 10) - bba_open_proof::PUBLIC_INPUT - proof_system::ZK_ROWS;
+pub const COUNTER_OFFSET : usize = bba_open_proof::PUBLIC_INPUT + proof_system::ZK_ROWS;
+pub const MAX_COUNTERS: usize = (1 << 10) - bba_open_proof::PUBLIC_INPUT - proof_system::ZK_ROWS - 3;
 
 impl<G: AffineCurve> Params<G> {
     pub fn randomize(&self, p: G) -> Randomized<G> {
@@ -39,6 +41,19 @@ impl<G: AffineCurve> Params<G> {
         let mask = self.h.mul(r.to_field(&self.endo));
         let result = (p.into_projective() + &mask).into_affine();
         Randomized { result, witness: r }
+    }
+
+    pub fn secret_commitment(&self, secrets: &bba_init_proof::Witness<G>) -> G {
+        let lg = &self.lagrange_commitments;
+        let bases = vec![self.h, lg[0], lg[2], lg[3], lg[4], lg[5], lg[6]];
+        let scalars = vec![secrets.r, secrets.c
+            , secrets.alpha[0]
+            , secrets.alpha[1]
+            , secrets.alpha[2]
+            , secrets.alpha[3]
+            , secrets.alpha[4] ];
+        let scalars : Vec<_> = scalars.iter().map(|x| x.into_repr()).collect();
+        VariableBaseMSM::multi_scalar_mul(bases.as_slice(), scalars.as_slice()).into_affine()
     }
 }
 
@@ -120,6 +135,7 @@ pub struct UpdateAuthority<'a, G: schnorr::CoordinateCurve, Other: CommitmentCur
     pub update_vk: VerifierIndex<'a, Other>,
     pub init_vk: VerifierIndex<'a, Other>,
     pub other_lgr_comms: Vec<PolyComm<Other>>,
+    pub big_other_lgr_comms: Vec<PolyComm<Other>>,
     pub group_map: Other::Map,
 }
 
@@ -131,7 +147,7 @@ pub struct UserProver<'a, G: CommitmentCurve, Other: CommitmentCurve> {
     pub update_pk: Index<'a, Other>,
     pub open_pk: Index<'a, G>,
     pub update_params: bba_update_proof::Params<Other::ScalarField>,
-    pub init_params: bba_init_proof::Params<Other::ScalarField>,
+    pub init_params: bba_init_proof::Params<G>,
     pub open_params: bba_open_proof::Params,
 }
 
@@ -147,6 +163,7 @@ pub struct UserState<G: CommitmentCurve> {
     // [authority_public_key]
     pub r: G::ScalarField,
     pub c: G::ScalarField,
+    pub alpha: [G::ScalarField; proof_system::ZK_ROWS],
     pub counters: Vec<u32>,
     pub acc: G,
     pub signature: schnorr::Signature<G>,
@@ -228,7 +245,7 @@ fn update_delta<G: AffineCurve>(
         .iter()
         .map(|u| {
             // The first N lagrange commitments are reserved for public input
-            lagrange_commitments[bba_open_proof::PUBLIC_INPUT + u.campaign_index as usize]
+            lagrange_commitments[COUNTER_OFFSET + u.campaign_index as usize]
         })
         .collect();
     let scalars: Vec<<G::ScalarField as PrimeField>::BigInt> =
@@ -242,6 +259,7 @@ pub fn init_secrets<G: AffineCurve>() -> bba_init_proof::Witness<G> {
     bba_init_proof::Witness {
         r: G::ScalarField::rand(rng),
         c: G::ScalarField::rand(rng),
+        alpha: array_init(|_| G::ScalarField::rand(rng))
     }
 }
 
@@ -286,9 +304,7 @@ impl<'a, C: proof_system::Cycle> User<'a, C> {
         secrets: bba_init_proof::Witness<C::Inner>,
         signature: schnorr::Signature<C::Inner>,
     ) -> Result<Self, &str> {
-        let acc = (config.bba.h.mul(secrets.r)
-            + &config.bba.lagrange_commitments[0].mul(secrets.c))
-            .into_affine();
+        let acc = config.bba.secret_commitment(&secrets);
 
         if !config
             .signer
@@ -303,6 +319,7 @@ impl<'a, C: proof_system::Cycle> User<'a, C> {
             state: UserState {
                 r: secrets.r,
                 c: secrets.c,
+                alpha: secrets.alpha,
                 acc: acc,
                 counters,
                 signature,
@@ -328,6 +345,7 @@ impl<'a, C: proof_system::Cycle> User<'a, C> {
             });
         let w = bba_open_proof::Witness {
             counters: self.state.counters.clone(),
+            alpha: self.state.alpha.clone()
         };
         let proof = proof_system::prove::<C::Inner, _, EFqSponge, EFrSponge>(
             &config.prover.open_pk,
@@ -413,8 +431,7 @@ where
         &self,
         secrets: bba_init_proof::Witness<G>,
     ) -> InitRequest<G, Other> {
-        let acc = self.bba.h.mul(secrets.r) + &self.bba.lagrange_commitments[0].mul(secrets.c);
-        let acc = acc.into_affine();
+        let acc = self.bba.secret_commitment(&secrets);
         let (acc_x, acc_y) = acc.to_coordinates().unwrap();
 
         let proof = proof_system::prove::<Other, _, EFqSponge, EFrSponge>(
@@ -422,7 +439,7 @@ where
             &self.prover.group_map,
             None,
             vec![acc_x, acc_y],
-            |sys, p| bba_init_proof::circuit(&self.prover.init_params, &Some(secrets), sys, p),
+            |sys, p| bba_init_proof::circuit::<_, G, _>(&self.prover.init_params, &Some(secrets), sys, p),
         );
         InitRequest { acc, proof }
     }
@@ -530,7 +547,7 @@ where
         req.proof.public = vec![acc.0, acc.1];
         match ProverProof::verify::<EFqSponge, EFrSponge>(
             &self.group_map,
-            &vec![(&self.init_vk, &self.other_lgr_comms, &req.proof)],
+            &vec![(&self.init_vk, &self.big_other_lgr_comms, &req.proof)],
         ) {
             Ok(true) => Ok(()),
             Ok(false) | Err(_) => Err("Init proof failed to verify"),
