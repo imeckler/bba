@@ -199,20 +199,27 @@ fn main() {
         let mut user =
             bba::User::<FpInner>::init(user_config, init_secrets, init_signature).unwrap();
 
+        let args : Vec<_> = std::env::args().collect();
+        if args.len() < 3 {
+            println!("Usage: cargo run --release -- NUMBER_OF_ACCUMULATORS_TO_UPDATE COUNTERS_TO_UPDATE_PER_ACCUMULATOR")
+        }
+        let accumulators_to_update : usize = args[1].parse().unwrap();
+        let updates_per_accumulator : u32 = args[2].parse().unwrap();
+
         // Then, the user can request to perform an update by incrementing views in some campaigns
-        let updates = (0..1000)
+        let updates = (0..updates_per_accumulator)
             .map(|i| bba::SingleUpdate {
                 campaign_index: i,
                 delta: 10 * (i + 1),
             })
             .collect();
-        let update_request = time("User:      Create BBA update request [1000 counters updated]", || {
+        let update_request = time(&*format!("User:      Create BBA update request [{} counters updated]", updates_per_accumulator), || {
             user.request_update::<SpongeQ, SpongeR>(updates)
         });
 
         // and the authority can validate the unlinkable update request and provide an updated BBA
-        let resp = time("Authority: Update BBA", || {
-            update_authority.perform_updates::<SpongeQ, SpongeR>(vec![update_request.clone()])[0]
+        let resp = time_batch("Authority: Update BBA", "user", accumulators_to_update, || {
+            update_authority.perform_updates::<SpongeQ, SpongeR>(vec![update_request.clone(); accumulators_to_update])[0]
                 .as_ref()
                 .unwrap()
                 .clone()

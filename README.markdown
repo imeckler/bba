@@ -21,20 +21,24 @@ rustup default 1.45.2
 2. Run
 
 ```
-cargo run --release
+cargo run --release -- NUMBER_OF_ACCUMULATORS_TO_UPDATE COUNTERS_TO_UPDATE_PER_ACCUMULATOR
+```
+E.g., to test performance of updating 1000 users' accumulators, each of which requires 100 updates, run
+```
+cargo run --release -- 1000 100
 ```
 
 You should see some output of the form
 
 ```
-Parameter precomputation (one time cost) (2.432729801s)
+Parameter precomputation (one time cost) (2.431505878s)
 
-User:      Create BBA init request (653.064071ms)
-Authority: Verify and sign initial accumulator (11.527393ms)
-User:      Create BBA update request [1000 counters updated] (362.221627ms)
-Authority: Update BBA (7.979831ms)
-User:      Process update response (1.005992ms)
-User:      Open BBA (157.451082ms)
+User:      Create BBA init request (653.833961ms)
+Authority: Verify and sign initial accumulator (11.485175ms)
+User:      Create BBA update request [100 counters updated] (368.676303ms)
+Authority: Update BBA (3.225820922s for 1000 users, 3.22582ms per user)
+User:      Process update response (609.066µs)
+User:      Open BBA (191.299822ms)
 ------------------------------
 Init proof size:    2309 bytes
 Update proof size:  2437 bytes
