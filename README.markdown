@@ -31,14 +31,15 @@ cargo run --release -- 1000 100
 You should see some output of the form
 
 ```
-Parameter precomputation (one time cost) (2.431505878s)
+Parameter precomputation (one time cost) (2.411098665s)
 
-User:      Create BBA init request (653.833961ms)
-Authority: Verify and sign initial accumulator (11.485175ms)
-User:      Create BBA update request [100 counters updated] (368.676303ms)
-Authority: Update BBA (3.225820922s for 1000 users, 3.22582ms per user)
-User:      Process update response (609.066µs)
-User:      Open BBA (191.299822ms)
+User:      Create BBA init request (652.601587ms)
+Authority: Verify and sign initial accumulator (304.106679ms for 100 users, 3.041066ms per user)
+User:      Create BBA update request [150 counters updated] (393.081617ms)
+Authority: Update BBA (349.475847ms for 100 users, 3.494758ms per user)
+User:      Process update response (911.496µs)
+User:      Open BBA (194.012563ms)
+Authority: Verify BBA (295.74514ms for 100 users, 2.957451ms per user)
 ------------------------------
 Init proof size:    2309 bytes
 Update proof size:  2437 bytes

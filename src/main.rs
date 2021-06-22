@@ -63,6 +63,13 @@ fn main() {
     let fq_proof_system_constants = fq_constants();
 
     {
+        let args : Vec<_> = std::env::args().collect();
+        if args.len() < 3 {
+            println!("Usage: cargo run --release -- NUMBER_OF_ACCUMULATORS_TO_UPDATE COUNTERS_TO_UPDATE_PER_ACCUMULATOR")
+        }
+        let accumulators_to_update : usize = args[1].parse().unwrap();
+        let updates_per_accumulator : u32 = args[2].parse().unwrap();
+
         let start = std::time::Instant::now();
         // Defining global parameters and performing one-time setup
 
@@ -190,21 +197,14 @@ fn main() {
         });
 
         // Then, the authority responds with an initial BBA.
-        let init_signature = time("Authority: Verify and sign initial accumulator", || {
+        let init_signature = time_batch("Authority: Verify and sign initial accumulator", "user", accumulators_to_update, || {
             update_authority
-                .perform_init::<SpongeQ, SpongeR>(init_request.clone())
-                .unwrap()
+                .batch_init::<SpongeQ, SpongeR>(vec![init_request.clone(); accumulators_to_update])
+                .unwrap()[0]
         });
 
         let mut user =
             bba::User::<FpInner>::init(user_config, init_secrets, init_signature).unwrap();
-
-        let args : Vec<_> = std::env::args().collect();
-        if args.len() < 3 {
-            println!("Usage: cargo run --release -- NUMBER_OF_ACCUMULATORS_TO_UPDATE COUNTERS_TO_UPDATE_PER_ACCUMULATOR")
-        }
-        let accumulators_to_update : usize = args[1].parse().unwrap();
-        let updates_per_accumulator : u32 = args[2].parse().unwrap();
 
         // Then, the user can request to perform an update by incrementing views in some campaigns
         let updates = (0..updates_per_accumulator)
@@ -232,9 +232,11 @@ fn main() {
         let opening = time("User:      Open BBA", || user.open::<PSpongeQ, PSpongeR>());
         let opening_size = bba::proof_size(&opening.proof);
         // Finally, we can verify the correctness of the opening
-        let _payout = opening
-            .verify::<PSpongeQ, PSpongeR>(&signer, &bba, brave_pubkey, &g_group_map, &open_vk)
-            .unwrap();
+
+        time_batch("Authority: Verify BBA", "user", accumulators_to_update, || {
+            bba::RewardOpening::verify_batch::<PSpongeQ, PSpongeR>(
+                &signer, &bba, brave_pubkey, &g_group_map, &open_vk, vec![&opening; accumulators_to_update])
+        }).unwrap();
 
         println!("------------------------------");
         println!(

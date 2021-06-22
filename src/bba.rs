@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use crate::bba_init_proof;
 use crate::bba_open_proof;
 use crate::bba_update_proof;
@@ -191,6 +192,49 @@ pub struct Payout<C: proof_system::Cycle> {
 }
 
 impl<C: proof_system::Cycle> RewardOpening<C> {
+    pub fn verify_batch<
+        'a,
+        EFqSponge: Clone + FqSponge<C::InnerField, C::Inner, C::OuterField>,
+        EFrSponge: FrSponge<C::OuterField>,
+    >(
+        signer: &schnorr::Signer<C::Inner>,
+        bba: &Params<C::Inner>,
+        authority_public_key: C::Inner,
+        group_map: &C::InnerMap,
+        vk: &VerifierIndex<'a, C::Inner>,
+        openings: Vec<&Self>
+    ) -> Result<(), String> {
+        let lgr_comms: Vec<PolyComm<_>> = bba
+            .lagrange_commitments
+            .iter()
+            .map(|g| PolyComm {
+                unshifted: vec![*g],
+                shifted: None,
+            })
+            .collect();
+        let batch : Vec<_> = openings.iter().map(|x| (vk, &lgr_comms, &x.proof)).collect();
+        match ProverProof::verify::<EFqSponge, EFrSponge>(
+            &group_map,
+            &batch
+        ) {
+            Ok(true) => Ok(()),
+            Ok(false) | Err(_) => Err("Open proof failed to verify"),
+        }?;
+
+        for opening in openings.iter() {
+            let amount = opening.proof.public[1];
+
+            let acc = opening.proof.commitments.w_comm[0].unshifted[0].into_projective()
+                - &bba.lagrange_commitments[1].mul(amount);
+
+            if !signer.verify(authority_public_key, acc.into(), opening.signature) {
+                return Err(String::from("Open signature failed to verify"));
+            }
+        }
+
+        return Ok(());
+    }
+
     pub fn verify<
         'a,
         EFqSponge: Clone + FqSponge<C::InnerField, C::Inner, C::OuterField>,
@@ -559,6 +603,39 @@ where
             Ok(false) | Err(_) => Err("Init proof failed to verify"),
         }?;
         Ok(self.signer.sign(self.signing_key, req.acc))
+    }
+
+    pub fn batch_init<
+        EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,
+        EFrSponge: FrSponge<Other::ScalarField>,
+    >(
+        &self,
+        mut reqs: Vec<InitRequest<G, Other>>,
+    ) -> Result<Vec<schnorr::Signature<G>>, &str> {
+        for req in reqs.iter_mut() {
+            let acc = match req.acc.to_coordinates() {
+                None => Err("Init bad acc"),
+                Some(p) => Ok(p),
+            }?;
+            req.proof.public = vec![acc.0, acc.1];
+        }
+
+        let batch : Vec<_> = reqs.iter().map(|r| (&self.init_vk, &self.big_other_lgr_comms, &r.proof)).collect();
+
+        match ProverProof::verify::<EFqSponge, EFrSponge>(
+            &self.group_map,
+            &batch,
+        ) {
+            Ok(true) => Ok(()),
+            Ok(false) | Err(_) => Err("Init proofs failed to verify"),
+        }?;
+        let accs : Vec<_> = reqs.iter().map(|r| r.acc).collect();
+        let signing_key = self.signing_key.clone();
+        let signer = self.signer.clone();
+        let res : Vec<_> = accs.par_iter().map(|acc| {
+            signer.sign(signing_key, *acc)
+        }).collect();
+        Ok(res)
     }
 
     // This function is batched for efficiency of proof verification
