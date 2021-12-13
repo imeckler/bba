@@ -1,9 +1,9 @@
 use crate::random_oracle;
-use algebra::{
-    pasta::{fp::Fp, fq::Fq, pallas::Affine as Other, vesta::Affine},
-    AffineCurve, BigInteger, FftField, Field, One, PrimeField, ProjectiveCurve, SquareRootField,
-    Zero,
-};
+
+use mina_curves::pasta::{fp::Fp, fq::Fq, pallas::Affine as Other, vesta::Affine};
+use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ff::{biginteger::BigInteger, SquareRootField, Zero, PrimeField, FftField, Field};
+
 use array_init::array_init;
 use commitment_dlog::{
     commitment::{ceil_log2, CommitmentCurve, PolyComm},

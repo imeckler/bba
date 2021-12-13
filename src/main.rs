@@ -1,12 +1,13 @@
-use algebra::{
-    pasta::{
-        fp::Fp,
-        fq::Fq,
-        pallas::{Affine as Other, PallasParameters},
-        vesta::{Affine, VestaParameters},
-    },
-    AffineCurve, ProjectiveCurve, UniformRand,
+use mina_curves::pasta::{
+    fp::Fp,
+    fq::Fq,
+    pallas::{Affine as Other, PallasParameters},
+    vesta::{Affine, VestaParameters},
 };
+
+use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ff::UniformRand;
+
 use array_init::array_init;
 use commitment_dlog::{
     commitment::{ceil_log2, CommitmentCurve, PolyComm},

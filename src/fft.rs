@@ -1,4 +1,6 @@
-use algebra::{AffineCurve, FftField, Field, One, ProjectiveCurve};
+use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ff::{FftField, Field, One};
+
 use commitment_dlog::{commitment::CommitmentCurve, srs::SRS};
 use ff_fft::{
     domain::{DomainCoeff, EvaluationDomain},

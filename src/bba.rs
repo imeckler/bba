@@ -6,7 +6,13 @@ use crate::endo::EndoScalar;
 use crate::fft::lagrange_commitments;
 use crate::proof_system;
 use crate::schnorr;
-use algebra::{AffineCurve, PrimeField, ProjectiveCurve, UniformRand, VariableBaseMSM, Zero};
+
+use ark_ff::{SquareRootField, PrimeField};
+use ark_ec::{
+    msm::VariableBaseMSM,
+    AffineCurve
+};
+
 use array_init::array_init;
 use commitment_dlog::{
     commitment::{CommitmentCurve, PolyComm},
@@ -19,6 +25,8 @@ use plonk_protocol_dlog::{
     prover::ProverProof,
 };
 use schnorr::SignatureParams;
+
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
 #[derive(Clone)]
 pub struct Params<G: AffineCurve> {
@@ -90,7 +98,9 @@ pub struct UpdateRequest<G: AffineCurve, Other: AffineCurve> {
 
 // size in bytes
 pub fn proof_size<G: CommitmentCurve>(proof: &ProverProof<G>) -> usize {
-    fn poly_comm<A>(pc: &PolyComm<A>) -> usize {
+    fn poly_comm<A>(pc: &PolyComm<A>) -> usize
+        where A: CanonicalDeserialize + CanonicalSerialize
+    {
         match &pc.shifted {
             None => pc.unshifted.len(),
             Some(_) => 1 + pc.unshifted.len(),
@@ -468,9 +478,9 @@ impl<'a, C: proof_system::Cycle> User<'a, C> {
 impl<'a, G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
     UserConfig<'a, G, Other>
 where
-    G::BaseField: algebra::SquareRootField + algebra::PrimeField,
-    <Other as algebra::curves::AffineCurve>::Projective:
-        std::ops::MulAssign<<G as algebra::curves::AffineCurve>::BaseField>,
+    G::BaseField: SquareRootField + PrimeField,
+    <Other as AffineCurve>::Projective:
+        std::ops::MulAssign<<G as AffineCurve>::BaseField>,
 {
     pub fn request_init<
         EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,
@@ -579,9 +589,9 @@ fn batch_verify_proofs<
 impl<'a, G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
     UpdateAuthority<'a, G, Other>
 where
-    G::BaseField: algebra::SquareRootField + algebra::PrimeField,
-    <Other as algebra::curves::AffineCurve>::Projective:
-        std::ops::MulAssign<<G as algebra::curves::AffineCurve>::BaseField>,
+    G::BaseField: SquareRootField + PrimeField,
+    <Other as AffineCurve>::Projective:
+        std::ops::MulAssign<<G as AffineCurve>::BaseField>,
 {
     pub fn perform_init<
         EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,

@@ -1,4 +1,4 @@
-use algebra::{BigInteger, PrimeField};
+use ark_ff::PrimeField;
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub struct EndoScalar<A: PrimeField>(pub A);

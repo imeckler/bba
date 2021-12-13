@@ -1,4 +1,11 @@
-use algebra::{AffineCurve, BigInteger, PrimeField, ProjectiveCurve, UniformRand, Zero};
+use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ff::{
+    biginteger::BigInteger,
+    PrimeField,
+    Zero,
+    UniformRand,
+};
+
 use array_init::array_init;
 use commitment_dlog::commitment::CommitmentCurve;
 use oracle::{poseidon::ArithmeticSpongeParams, poseidon::*};
