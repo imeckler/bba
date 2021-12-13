@@ -13,7 +13,7 @@ use commitment_dlog::{
     srs::SRS,
 };
 use oracle::FqSponge;
-use plonk_5_wires_protocol_dlog::{
+use plonk_protocol_dlog::{
     index::{Index, VerifierIndex},
     plonk_sponge::FrSponge,
     prover::ProverProof,

@@ -7,15 +7,19 @@ use algebra::{
 use array_init::array_init;
 use commitment_dlog::{
     commitment::{ceil_log2, CommitmentCurve, PolyComm},
-    srs::{endos, SRSSpec, SRS},
+    srs::{endos, SRS},
 };
-use oracle::{poseidon::ArithmeticSpongeParams, poseidon_5_wires::*, FqSponge};
-use plonk_5_wires_circuits::{
+use oracle::{poseidon::ArithmeticSpongeParams, poseidon::*, FqSponge};
+use plonk_circuits::{
     constraints::ConstraintSystem,
     gate::{CircuitGate, GateType},
     wires::Wire,
 };
-use plonk_5_wires_protocol_dlog::{index::Index, plonk_sponge::FrSponge, prover::ProverProof};
+use plonk_protocol_dlog::{
+    index::{Index, SRSSpec}, 
+    plonk_sponge::FrSponge, 
+    prover::ProverProof
+};
 use std::collections::HashMap;
 
 pub const COLUMNS: usize = 5;
@@ -515,7 +519,7 @@ pub trait Cs<F: FftField> {
                 self.var(|| {
                     // TODO: Lift out
                     let this: [F; COLUMNS] =
-                        array_init(|j| sbox::<F, PlonkSpongeConstants>(prev[j].value.unwrap()));
+                        array_init(|j| sbox::<F, PlonkSpongeConstants5W>(prev[j].value.unwrap()));
                     rc[i]
                         + &this
                             .iter()

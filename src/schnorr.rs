@@ -1,7 +1,7 @@
 use algebra::{AffineCurve, BigInteger, PrimeField, ProjectiveCurve, UniformRand, Zero};
 use array_init::array_init;
 use commitment_dlog::commitment::CommitmentCurve;
-use oracle::{poseidon::ArithmeticSpongeParams, poseidon_5_wires::*};
+use oracle::{poseidon::ArithmeticSpongeParams, poseidon::*};
 
 use crate::{endo, random_oracle};
 
@@ -95,7 +95,7 @@ where
         let input = [x, y, r, G::BaseField::zero(), G::BaseField::zero()];
         let res = (0..random_oracle::POSEIDON_ROUNDS).fold(input, |prev, round| {
             let rc = &self.sponge.round_constants[round];
-            let s: [_; COLUMNS] = array_init(|j| sbox::<_, PlonkSpongeConstants>(prev[j]));
+            let s: [_; COLUMNS] = array_init(|j| sbox::<_, PlonkSpongeConstants5W>(prev[j]));
             array_init(|i| {
                 let m = &self.sponge.mds[i];
                 rc[i]
