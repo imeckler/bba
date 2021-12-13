@@ -1,5 +1,7 @@
 use ark_ec::{AffineCurve, ProjectiveCurve};
+
 use ark_ff::{FftField, Field, One};
+//use algebra_core::FftField;
 
 use commitment_dlog::{commitment::CommitmentCurve, srs::SRS};
 use ff_fft::{

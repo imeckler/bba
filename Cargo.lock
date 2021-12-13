@@ -203,6 +203,7 @@ name = "brave-poc"
 version = "0.1.0"
 dependencies = [
  "algebra",
+ "algebra-core",
  "ark-ec",
  "ark-ff",
  "ark-serialize",

@@ -2,13 +2,14 @@ use crate::random_oracle;
 
 use mina_curves::pasta::{fp::Fp, fq::Fq, pallas::Affine as Other, vesta::Affine};
 use ark_ec::{AffineCurve, ProjectiveCurve};
-use ark_ff::{biginteger::BigInteger, SquareRootField, Zero, PrimeField, FftField, Field};
+use ark_ff::{biginteger::BigInteger, SquareRootField, Zero, PrimeField, FftField, Field, One};
 
 use array_init::array_init;
 use commitment_dlog::{
-    commitment::{ceil_log2, CommitmentCurve, PolyComm},
+    commitment::{ceil_log2, CommitmentCurve, PolyComm, CommitmentField},
     srs::{endos, SRS},
 };
+
 use oracle::{poseidon::ArithmeticSpongeParams, poseidon::*, FqSponge};
 use plonk_circuits::{
     constraints::ConstraintSystem,
@@ -669,6 +670,7 @@ pub fn prove<
 ) -> ProverProof<G>
 where
     H: FnOnce(&mut WitnessGenerator<G::ScalarField>, Vec<Var<G::ScalarField>>) -> (),
+    <G as ark_ec::AffineCurve>::ScalarField: CommitmentField
 {
     let mut gen: WitnessGenerator<G::ScalarField> = WitnessGenerator {
         rows: public_input
@@ -713,6 +715,7 @@ pub fn generate_proving_key<'a, C: Cycle, H>(
 ) -> Index<'a, C::Outer>
 where
     H: FnOnce(&mut System<C::InnerField>, Vec<Var<C::InnerField>>) -> (),
+    <C as Cycle>::InnerField: CommitmentField
 {
     let mut system: System<C::InnerField> = System {
         next_variable: 0,

@@ -1,4 +1,5 @@
 use ark_ff::PrimeField;
+use groupmap::GroupMap;
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub struct EndoScalar<A: PrimeField>(pub A);

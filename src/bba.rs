@@ -7,15 +7,16 @@ use crate::fft::lagrange_commitments;
 use crate::proof_system;
 use crate::schnorr;
 
-use ark_ff::{SquareRootField, PrimeField};
+use ark_ff::{SquareRootField, PrimeField, UniformRand, Zero};
 use ark_ec::{
     msm::VariableBaseMSM,
-    AffineCurve
+    AffineCurve,
+    ProjectiveCurve
 };
 
 use array_init::array_init;
 use commitment_dlog::{
-    commitment::{CommitmentCurve, PolyComm},
+    commitment::{CommitmentCurve, PolyComm, CommitmentField},
     srs::SRS,
 };
 use oracle::FqSponge;
@@ -154,7 +155,11 @@ pub struct UpdateAuthority<'a, G: schnorr::CoordinateCurve, Other: CommitmentCur
     pub group_map: Other::Map,
 }
 
-pub struct UserProver<'a, G: CommitmentCurve, Other: CommitmentCurve> {
+pub struct UserProver<'a, G: CommitmentCurve, Other: CommitmentCurve>
+    where 
+        <Other as ark_ec::AffineCurve>::ScalarField: CommitmentField,
+        <G as ark_ec::AffineCurve>::ScalarField: CommitmentField
+{
     pub proof_system_constants: proof_system::Constants<Other::ScalarField>,
     pub group_map: Other::Map,
     pub g_group_map: G::Map,
@@ -166,7 +171,11 @@ pub struct UserProver<'a, G: CommitmentCurve, Other: CommitmentCurve> {
     pub open_params: bba_open_proof::Params,
 }
 
-pub struct UserConfig<'a, G: CommitmentCurve, Other: CommitmentCurve> {
+pub struct UserConfig<'a, G: CommitmentCurve, Other: CommitmentCurve> 
+    where
+        <Other as ark_ec::AffineCurve>::ScalarField: CommitmentField,
+        <G as ark_ec::AffineCurve>::ScalarField: CommitmentField
+{
     pub signer: schnorr::Signer<G>,
     pub authority_public_key: schnorr::PublicKey<G>,
     pub bba: Params<G>,
@@ -185,7 +194,10 @@ pub struct UserState<G: CommitmentCurve> {
     pub pending_update_witness: Option<Randomized<G>>,
 }
 
-pub struct User<'a, C: proof_system::Cycle> {
+pub struct User<'a, C: proof_system::Cycle> 
+    where <C as proof_system::Cycle>::InnerField: CommitmentField,
+          <C as proof_system::Cycle>::OuterField: CommitmentField
+{
     //    G: CommitmentCurve, Other: CommitmentCurve
     pub config: UserConfig<'a, C::Inner, C::Outer>,
     pub state: UserState<C::Inner>,
@@ -321,7 +333,10 @@ pub fn init_secrets<G: AffineCurve>() -> bba_init_proof::Witness<G> {
     }
 }
 
-impl<'a, C: proof_system::Cycle> User<'a, C> {
+impl<'a, C: proof_system::Cycle> User<'a, C> 
+    where <C as proof_system::Cycle>::InnerField: CommitmentField,
+          <C as proof_system::Cycle>::OuterField: CommitmentField
+{
     pub fn check_invariant(&self) {
         let reward = self
             .state
@@ -481,6 +496,8 @@ where
     G::BaseField: SquareRootField + PrimeField,
     <Other as AffineCurve>::Projective:
         std::ops::MulAssign<<G as AffineCurve>::BaseField>,
+        <G as ark_ec::AffineCurve>::BaseField: CommitmentField,
+        <G as ark_ec::AffineCurve>::ScalarField: CommitmentField
 {
     pub fn request_init<
         EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,
@@ -505,7 +522,10 @@ where
     }
 }
 
-impl<'a, C: proof_system::Cycle> User<'a, C> {
+impl<'a, C: proof_system::Cycle> User<'a, C> 
+    where <C as proof_system::Cycle>::InnerField: CommitmentField,
+          <C as proof_system::Cycle>::OuterField: CommitmentField
+{
     pub fn request_update<
         EFqSponge: Clone + FqSponge<C::OuterField, C::Outer, C::InnerField>,
         EFrSponge: FrSponge<C::InnerField>,
