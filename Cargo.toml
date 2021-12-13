@@ -7,14 +7,14 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-oracle = { path = "./marlin/oracle" }
-groupmap = { path = "./marlin/zexe/groupmap" }
-algebra = { path = "./marlin/zexe/algebra", features = [ "parallel", "pasta", "asm" ] }
-commitment_dlog = { path = "./marlin/dlog/commitment" }
-plonk_5_wires_protocol_dlog = { path = "./marlin/dlog/plonk-5-wires" }
-plonk_5_wires_circuits = { path = "./marlin/circuits/plonk-5-wires" }
+oracle = { git = "https://github.com/o1-labs/proof-systems" }
+groupmap= { git = "https://github.com/o1-labs/zexe" }
+algebra = { git = "https://github.com/o1-labs/zexe", features = [ "parallel", "pasta", "asm" ] }
+commitment_dlog = { git = "https://github.com/o1-labs/proof-systems" }
+plonk_protocol_dlog = {  git = "https://github.com/o1-labs/proof-systems" }
+plonk_circuits = {  git = "https://github.com/o1-labs/proof-systems" }
 
-ff-fft = { path = "./marlin/zexe/ff-fft" }
+ff-fft = { git = "https://github.com/o1-labs/zexe" }
 
 rand_core = "0.5"
 array-init = "0.1.1"
