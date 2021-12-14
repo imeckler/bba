@@ -1,9 +1,12 @@
 use crate::bba;
 use crate::proof_system::*;
 use crate::schnorr;
-use algebra::{AffineCurve, FftField, PrimeField};
+
+use ark_ff::{FftField, PrimeField};
+use ark_ec::AffineCurve;
+
 use array_init::array_init;
-use plonk_5_wires_circuits::gate::GateType;
+use plonk_circuits::gate::GateType;
 use schnorr::CoordinateCurve;
 
 // c, total value

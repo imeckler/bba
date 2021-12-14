@@ -1,21 +1,30 @@
 use crate::random_oracle;
-use algebra::{
-    pasta::{fp::Fp, fq::Fq, pallas::Affine as Other, vesta::Affine},
-    AffineCurve, BigInteger, FftField, Field, One, PrimeField, ProjectiveCurve, SquareRootField,
-    Zero,
-};
+
+use mina_curves::pasta::{fp::Fp, fq::Fq, pallas::Affine as Other, vesta::Affine};
+use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ff::{biginteger::BigInteger, SquareRootField, Zero, PrimeField, FftField, Field, One};
+
 use array_init::array_init;
 use commitment_dlog::{
-    commitment::{ceil_log2, CommitmentCurve, PolyComm},
-    srs::{endos, SRSSpec, SRS},
+    commitment::{ceil_log2, CommitmentCurve, PolyComm, CommitmentField},
+    srs::{endos, SRS},
 };
-use oracle::{poseidon::ArithmeticSpongeParams, poseidon_5_wires::*, FqSponge};
-use plonk_5_wires_circuits::{
-    constraints::ConstraintSystem,
+
+use oracle::{poseidon::ArithmeticSpongeParams, poseidon::*, FqSponge};
+
+use plonk_circuits::constraints::ConstraintSystem;
+use kimchi_circuits::{
     gate::{CircuitGate, GateType},
     wires::Wire,
 };
-use plonk_5_wires_protocol_dlog::{index::Index, plonk_sponge::FrSponge, prover::ProverProof};
+
+use plonk_protocol_dlog::index::SRSSpec;
+
+use kimchi::{
+    index::Index, 
+    plonk_sponge::FrSponge, 
+    prover::ProverProof
+};
 use std::collections::HashMap;
 
 pub const COLUMNS: usize = 5;
@@ -259,7 +268,7 @@ pub trait Cs<F: FftField> {
     fn assert_add_group(&mut self, (x1, y1): (Var<F>, Var<F>), (x2, y2): (Var<F>, Var<F>), (x3, y3): (Var<F>, Var<F>)) {
         let inv = self.var(|| (x2.val() - x1.val()).inverse().unwrap());
         self.gate(GateSpec {
-            typ: GateType::Add,
+            typ: GateType::CompleteAdd,
             row: [x1, y1, x2, y2, inv],
             c: vec![],
         });
@@ -515,7 +524,7 @@ pub trait Cs<F: FftField> {
                 self.var(|| {
                     // TODO: Lift out
                     let this: [F; COLUMNS] =
-                        array_init(|j| sbox::<F, PlonkSpongeConstants>(prev[j].value.unwrap()));
+                        array_init(|j| sbox::<F, PlonkSpongeConstants5W>(prev[j].value.unwrap()));
                     rc[i]
                         + &this
                             .iter()
@@ -651,13 +660,12 @@ impl<F: FftField> System<F> {
 }
 
 pub fn prove<
-    'a,
     G: CommitmentCurve,
     H,
     EFqSponge: Clone + FqSponge<G::BaseField, G, G::ScalarField>,
     EFrSponge: FrSponge<G::ScalarField>,
 >(
-    index: &Index<'a, G>,
+    index: &Index<G>,
     group_map: &G::Map,
     blinders: Option<[Option<G::ScalarField>; COLUMNS]>,
     public_input: Vec<G::ScalarField>,
@@ -665,6 +673,7 @@ pub fn prove<
 ) -> ProverProof<G>
 where
     H: FnOnce(&mut WitnessGenerator<G::ScalarField>, Vec<Var<G::ScalarField>>) -> (),
+    <G as ark_ec::AffineCurve>::ScalarField: CommitmentField
 {
     let mut gen: WitnessGenerator<G::ScalarField> = WitnessGenerator {
         rows: public_input
@@ -706,9 +715,10 @@ pub fn generate_proving_key<'a, C: Cycle, H>(
     poseidon_params: &ArithmeticSpongeParams<C::OuterField>,
     public: usize,
     main: H,
-) -> Index<'a, C::Outer>
+) -> Index<C::Outer>
 where
     H: FnOnce(&mut System<C::InnerField>, Vec<Var<C::InnerField>>) -> (),
+    <C as Cycle>::InnerField: CommitmentField
 {
     let mut system: System<C::InnerField> = System {
         next_variable: 0,

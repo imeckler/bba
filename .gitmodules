@@ -1,3 +1,0 @@
-[submodule "marlin"]
-	path = marlin
-	url = git@github.com:o1-labs/marlin.git

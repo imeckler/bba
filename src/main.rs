@@ -1,12 +1,13 @@
-use algebra::{
-    pasta::{
-        fp::Fp,
-        fq::Fq,
-        pallas::{Affine as Other, PallasParameters},
-        vesta::{Affine, VestaParameters},
-    },
-    AffineCurve, ProjectiveCurve, UniformRand,
+use mina_curves::pasta::{
+    fp::Fp,
+    fq::Fq,
+    pallas::{Affine as Other, PallasParameters},
+    vesta::{Affine, VestaParameters},
 };
+
+use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ff::UniformRand;
+
 use array_init::array_init;
 use commitment_dlog::{
     commitment::{ceil_log2, CommitmentCurve, PolyComm},
@@ -14,9 +15,10 @@ use commitment_dlog::{
 };
 use groupmap::GroupMap;
 use oracle::{
-    poseidon_5_wires::*,
-    sponge_5_wires::{DefaultFqSponge, DefaultFrSponge},
+    poseidon::*,
+    sponge::{DefaultFqSponge, DefaultFrSponge},
 };
+use groupmap::GroupMap; 
 
 mod bba;
 mod bba_init_proof;
@@ -33,11 +35,11 @@ use util::*;
 
 use schnorr::*;
 
-type SpongeQ = DefaultFqSponge<VestaParameters, PlonkSpongeConstants>;
-type SpongeR = DefaultFrSponge<Fp, PlonkSpongeConstants>;
+type SpongeQ = DefaultFqSponge<VestaParameters, PlonkSpongeConstants5W>;
+type SpongeR = DefaultFrSponge<Fp, PlonkSpongeConstants5W>;
 
-type PSpongeQ = DefaultFqSponge<PallasParameters, PlonkSpongeConstants>;
-type PSpongeR = DefaultFrSponge<Fq, PlonkSpongeConstants>;
+type PSpongeQ = DefaultFqSponge<PallasParameters, PlonkSpongeConstants5W>;
+type PSpongeR = DefaultFrSponge<Fq, PlonkSpongeConstants5W>;
 
 fn main() {
     let (_endo_q, endo_r) = endos::<Other>();

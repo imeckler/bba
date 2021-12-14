@@ -6,19 +6,31 @@ use crate::endo::EndoScalar;
 use crate::fft::lagrange_commitments;
 use crate::proof_system;
 use crate::schnorr;
-use algebra::{AffineCurve, PrimeField, ProjectiveCurve, UniformRand, VariableBaseMSM, Zero};
+
+use ark_ff::{SquareRootField, PrimeField, UniformRand, Zero};
+use ark_ec::{
+    msm::VariableBaseMSM,
+    AffineCurve,
+    ProjectiveCurve
+};
+
 use array_init::array_init;
 use commitment_dlog::{
-    commitment::{CommitmentCurve, PolyComm},
+    commitment::{CommitmentCurve, PolyComm, CommitmentField},
     srs::SRS,
 };
 use oracle::FqSponge;
-use plonk_5_wires_protocol_dlog::{
+
+//use plonk_protocol_dlog::{
+use kimchi::{
+    prover::ProverProof,
     index::{Index, VerifierIndex},
     plonk_sponge::FrSponge,
-    prover::ProverProof,
 };
+
 use schnorr::SignatureParams;
+
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
 #[derive(Clone)]
 pub struct Params<G: AffineCurve> {
@@ -90,7 +102,9 @@ pub struct UpdateRequest<G: AffineCurve, Other: AffineCurve> {
 
 // size in bytes
 pub fn proof_size<G: CommitmentCurve>(proof: &ProverProof<G>) -> usize {
-    fn poly_comm<A>(pc: &PolyComm<A>) -> usize {
+    fn poly_comm<A>(pc: &PolyComm<A>) -> usize
+        where A: CanonicalDeserialize + CanonicalSerialize
+    {
         match &pc.shifted {
             None => pc.unshifted.len(),
             Some(_) => 1 + pc.unshifted.len(),
@@ -133,34 +147,42 @@ pub struct UpdateResponse<G: AffineCurve> {
     signature: schnorr::Signature<G>,
 }
 
-pub struct UpdateAuthority<'a, G: schnorr::CoordinateCurve, Other: CommitmentCurve> {
+pub struct UpdateAuthority<G: schnorr::CoordinateCurve, Other: CommitmentCurve> {
     pub signing_key: schnorr::PrivateKey<G>,
     pub signer: schnorr::Signer<G>,
     pub lgr_comms: Vec<G>,
-    pub update_vk: VerifierIndex<'a, Other>,
-    pub init_vk: VerifierIndex<'a, Other>,
+    pub update_vk: VerifierIndex<Other>,
+    pub init_vk: VerifierIndex<Other>,
     pub other_lgr_comms: Vec<PolyComm<Other>>,
     pub big_other_lgr_comms: Vec<PolyComm<Other>>,
     pub group_map: Other::Map,
 }
 
-pub struct UserProver<'a, G: CommitmentCurve, Other: CommitmentCurve> {
+pub struct UserProver<G: CommitmentCurve, Other: CommitmentCurve>
+    where 
+        <Other as ark_ec::AffineCurve>::ScalarField: CommitmentField,
+        <G as ark_ec::AffineCurve>::ScalarField: CommitmentField
+{
     pub proof_system_constants: proof_system::Constants<Other::ScalarField>,
     pub group_map: Other::Map,
     pub g_group_map: G::Map,
-    pub init_pk: Index<'a, Other>,
-    pub update_pk: Index<'a, Other>,
-    pub open_pk: Index<'a, G>,
+    pub init_pk: Index<Other>,
+    pub update_pk: Index<Other>,
+    pub open_pk: Index<G>,
     pub update_params: bba_update_proof::Params<Other::ScalarField>,
     pub init_params: bba_init_proof::Params<G>,
     pub open_params: bba_open_proof::Params,
 }
 
-pub struct UserConfig<'a, G: CommitmentCurve, Other: CommitmentCurve> {
+pub struct UserConfig<G: CommitmentCurve, Other: CommitmentCurve> 
+    where
+        <Other as ark_ec::AffineCurve>::ScalarField: CommitmentField,
+        <G as ark_ec::AffineCurve>::ScalarField: CommitmentField
+{
     pub signer: schnorr::Signer<G>,
     pub authority_public_key: schnorr::PublicKey<G>,
     pub bba: Params<G>,
-    pub prover: UserProver<'a, G, Other>,
+    pub prover: UserProver<G, Other>,
 }
 
 pub struct UserState<G: CommitmentCurve> {
@@ -175,9 +197,12 @@ pub struct UserState<G: CommitmentCurve> {
     pub pending_update_witness: Option<Randomized<G>>,
 }
 
-pub struct User<'a, C: proof_system::Cycle> {
+pub struct User<C: proof_system::Cycle> 
+    where <C as proof_system::Cycle>::InnerField: CommitmentField,
+          <C as proof_system::Cycle>::OuterField: CommitmentField
+{
     //    G: CommitmentCurve, Other: CommitmentCurve
-    pub config: UserConfig<'a, C::Inner, C::Outer>,
+    pub config: UserConfig<C::Inner, C::Outer>,
     pub state: UserState<C::Inner>,
 }
 
@@ -193,7 +218,6 @@ pub struct Payout<C: proof_system::Cycle> {
 
 impl<C: proof_system::Cycle> RewardOpening<C> {
     pub fn verify_batch<
-        'a,
         EFqSponge: Clone + FqSponge<C::InnerField, C::Inner, C::OuterField>,
         EFrSponge: FrSponge<C::OuterField>,
     >(
@@ -201,7 +225,7 @@ impl<C: proof_system::Cycle> RewardOpening<C> {
         bba: &Params<C::Inner>,
         authority_public_key: C::Inner,
         group_map: &C::InnerMap,
-        vk: &VerifierIndex<'a, C::Inner>,
+        vk: &VerifierIndex<C::Inner>,
         openings: Vec<&Self>
     ) -> Result<(), String> {
         let lgr_comms: Vec<PolyComm<_>> = bba
@@ -236,7 +260,6 @@ impl<C: proof_system::Cycle> RewardOpening<C> {
     }
 
     pub fn verify<
-        'a,
         EFqSponge: Clone + FqSponge<C::InnerField, C::Inner, C::OuterField>,
         EFrSponge: FrSponge<C::OuterField>,
     >(
@@ -245,7 +268,7 @@ impl<C: proof_system::Cycle> RewardOpening<C> {
         bba: &Params<C::Inner>,
         authority_public_key: C::Inner,
         group_map: &C::InnerMap,
-        vk: &VerifierIndex<'a, C::Inner>,
+        vk: &VerifierIndex<C::Inner>,
     ) -> Result<Payout<C>, &str> {
         let lgr_comms: Vec<PolyComm<_>> = bba
             .lagrange_commitments
@@ -311,7 +334,10 @@ pub fn init_secrets<G: AffineCurve>() -> bba_init_proof::Witness<G> {
     }
 }
 
-impl<'a, C: proof_system::Cycle> User<'a, C> {
+impl<C: proof_system::Cycle> User<C> 
+    where <C as proof_system::Cycle>::InnerField: CommitmentField,
+          <C as proof_system::Cycle>::OuterField: CommitmentField
+{
     pub fn check_invariant(&self) {
         let reward = self
             .state
@@ -348,17 +374,17 @@ impl<'a, C: proof_system::Cycle> User<'a, C> {
     }
 
     pub fn init(
-        config: UserConfig<'a, C::Inner, C::Outer>,
+        config: UserConfig<C::Inner, C::Outer>,
         secrets: bba_init_proof::Witness<C::Inner>,
         signature: schnorr::Signature<C::Inner>,
-    ) -> Result<Self, &str> {
+    ) -> Result<Self, String> {
         let acc = config.bba.secret_commitment(&secrets);
 
         if !config
             .signer
             .verify(config.authority_public_key, acc, signature)
         {
-            return Err("init signature failed to verify");
+            return Err("init signature failed to verify".to_string());
         }
 
         let counters = vec![0; MAX_COUNTERS];
@@ -466,11 +492,13 @@ impl<'a, C: proof_system::Cycle> User<'a, C> {
 }
 
 impl<'a, G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
-    UserConfig<'a, G, Other>
+    UserConfig<G, Other>
 where
-    G::BaseField: algebra::SquareRootField + algebra::PrimeField,
-    <Other as algebra::curves::AffineCurve>::Projective:
-        std::ops::MulAssign<<G as algebra::curves::AffineCurve>::BaseField>,
+    G::BaseField: SquareRootField + PrimeField,
+    <Other as AffineCurve>::Projective:
+        std::ops::MulAssign<<G as AffineCurve>::BaseField>,
+        <G as ark_ec::AffineCurve>::BaseField: CommitmentField,
+        <G as ark_ec::AffineCurve>::ScalarField: CommitmentField
 {
     pub fn request_init<
         EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,
@@ -495,7 +523,10 @@ where
     }
 }
 
-impl<'a, C: proof_system::Cycle> User<'a, C> {
+impl<C: proof_system::Cycle> User<C> 
+    where <C as proof_system::Cycle>::InnerField: CommitmentField,
+          <C as proof_system::Cycle>::OuterField: CommitmentField
+{
     pub fn request_update<
         EFqSponge: Clone + FqSponge<C::OuterField, C::Outer, C::InnerField>,
         EFrSponge: FrSponge<C::InnerField>,
@@ -577,11 +608,11 @@ fn batch_verify_proofs<
 
 // This code would run on brave's server for instance
 impl<'a, G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
-    UpdateAuthority<'a, G, Other>
+    UpdateAuthority<G, Other>
 where
-    G::BaseField: algebra::SquareRootField + algebra::PrimeField,
-    <Other as algebra::curves::AffineCurve>::Projective:
-        std::ops::MulAssign<<G as algebra::curves::AffineCurve>::BaseField>,
+    G::BaseField: SquareRootField + PrimeField,
+    <Other as AffineCurve>::Projective:
+        std::ops::MulAssign<<G as AffineCurve>::BaseField>,
 {
     pub fn perform_init<
         EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,
