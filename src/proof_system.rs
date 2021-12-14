@@ -11,13 +11,17 @@ use commitment_dlog::{
 };
 
 use oracle::{poseidon::ArithmeticSpongeParams, poseidon::*, FqSponge};
-use plonk_circuits::{
-    constraints::ConstraintSystem,
+
+use plonk_circuits::constraints::ConstraintSystem;
+use kimchi_circuits::{
     gate::{CircuitGate, GateType},
     wires::Wire,
 };
-use plonk_protocol_dlog::{
-    index::{Index, SRSSpec}, 
+
+use plonk_protocol_dlog::index::SRSSpec;
+
+use kimchi::{
+    index::Index, 
     plonk_sponge::FrSponge, 
     prover::ProverProof
 };
@@ -264,7 +268,7 @@ pub trait Cs<F: FftField> {
     fn assert_add_group(&mut self, (x1, y1): (Var<F>, Var<F>), (x2, y2): (Var<F>, Var<F>), (x3, y3): (Var<F>, Var<F>)) {
         let inv = self.var(|| (x2.val() - x1.val()).inverse().unwrap());
         self.gate(GateSpec {
-            typ: GateType::Add,
+            typ: GateType::CompleteAdd,
             row: [x1, y1, x2, y2, inv],
             c: vec![],
         });
@@ -656,13 +660,12 @@ impl<F: FftField> System<F> {
 }
 
 pub fn prove<
-    'a,
     G: CommitmentCurve,
     H,
     EFqSponge: Clone + FqSponge<G::BaseField, G, G::ScalarField>,
     EFrSponge: FrSponge<G::ScalarField>,
 >(
-    index: &Index<'a, G>,
+    index: &Index<G>,
     group_map: &G::Map,
     blinders: Option<[Option<G::ScalarField>; COLUMNS]>,
     public_input: Vec<G::ScalarField>,
@@ -712,7 +715,7 @@ pub fn generate_proving_key<'a, C: Cycle, H>(
     poseidon_params: &ArithmeticSpongeParams<C::OuterField>,
     public: usize,
     main: H,
-) -> Index<'a, C::Outer>
+) -> Index<C::Outer>
 where
     H: FnOnce(&mut System<C::InnerField>, Vec<Var<C::InnerField>>) -> (),
     <C as Cycle>::InnerField: CommitmentField

@@ -10,8 +10,12 @@ edition = "2018"
 oracle = { git = "https://github.com/o1-labs/proof-systems" }
 groupmap= { git = "https://github.com/o1-labs/zexe" }
 commitment_dlog = { git = "https://github.com/o1-labs/proof-systems" }
+
 plonk_protocol_dlog = {  git = "https://github.com/o1-labs/proof-systems" }
 plonk_circuits = {  git = "https://github.com/o1-labs/proof-systems" }
+
+kimchi = { git = "https://github.com/o1-labs/proof-systems" }
+kimchi-circuits = {  git = "https://github.com/o1-labs/proof-systems" }
 
 algebra-core = { git = "https://github.com/o1-labs/zexe", default-features = false }
 algebra = { git = "https://github.com/o1-labs/zexe", features = [ "parallel", "pasta", "asm" ] }

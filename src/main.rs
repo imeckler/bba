@@ -18,6 +18,7 @@ use oracle::{
     poseidon::*,
     sponge::{DefaultFqSponge, DefaultFrSponge},
 };
+use groupmap::GroupMap; 
 
 mod bba;
 mod bba_init_proof;

@@ -211,6 +211,8 @@ dependencies = [
  "commitment_dlog",
  "ff-fft",
  "groupmap 0.1.0 (git+https://github.com/o1-labs/zexe)",
+ "kimchi",
+ "kimchi-circuits",
  "mina-curves",
  "oracle",
  "plonk_circuits",
@@ -218,6 +220,12 @@ dependencies = [
  "rand_core 0.5.1",
  "rayon",
 ]
+
+[[package]]
+name = "byteorder"
+version = "1.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
 
 [[package]]
 name = "cfg-if"
@@ -237,9 +245,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "colored"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3616f750b84d8f0de8a58bda93e08e2a81ad3f523089b05f1dffecab48c6cbd"
+dependencies = [
+ "atty",
+ "lazy_static",
+ "winapi",
+]
+
+[[package]]
 name = "commitment_dlog"
 version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems#6af257b793d80f900675acc01b16fd4bf6375268"
+source = "git+https://github.com/o1-labs/proof-systems#106c6ddfa913dac683daf3369788808f0a75c4f9"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -247,9 +266,9 @@ dependencies = [
  "ark-serialize",
  "array-init 1.0.0",
  "blake2",
- "colored",
+ "colored 1.9.3",
  "groupmap 0.1.0 (git+https://github.com/o1-labs/proof-systems)",
- "itertools",
+ "itertools 0.8.2",
  "mina-curves",
  "o1-utils",
  "oracle",
@@ -434,7 +453,7 @@ dependencies = [
 [[package]]
 name = "groupmap"
 version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems#6af257b793d80f900675acc01b16fd4bf6375268"
+source = "git+https://github.com/o1-labs/proof-systems#106c6ddfa913dac683daf3369788808f0a75c4f9"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -490,10 +509,69 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9a9d19fa1e79b6215ff29b9d6880b706147f16e9b1dbb1e4e5947b5b02bc5e3"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
+
+[[package]]
+name = "kimchi"
+version = "0.1.0"
+source = "git+https://github.com/o1-labs/proof-systems#106c6ddfa913dac683daf3369788808f0a75c4f9"
+dependencies = [
+ "ark-ec",
+ "ark-ff",
+ "ark-poly",
+ "ark-serialize",
+ "array-init 1.0.0",
+ "colored 2.0.0",
+ "commitment_dlog",
+ "groupmap 0.1.0 (git+https://github.com/o1-labs/proof-systems)",
+ "kimchi-circuits",
+ "mina-curves",
+ "o1-utils",
+ "oracle",
+ "rand 0.8.4",
+ "rand_core 0.5.1",
+ "rayon",
+ "rmp-serde",
+ "serde",
+ "serde_with",
+ "sprs 0.9.4",
+]
+
+[[package]]
+name = "kimchi-circuits"
+version = "0.1.0"
+source = "git+https://github.com/o1-labs/proof-systems#106c6ddfa913dac683daf3369788808f0a75c4f9"
+dependencies = [
+ "ark-ec",
+ "ark-ff",
+ "ark-poly",
+ "ark-serialize",
+ "array-init 1.0.0",
+ "blake2",
+ "itertools 0.10.3",
+ "mina-curves",
+ "num-derive",
+ "num-traits 0.2.14",
+ "o1-utils",
+ "oracle",
+ "rand 0.8.4",
+ "rand_core 0.5.1",
+ "rayon",
+ "serde",
+ "serde_with",
+]
 
 [[package]]
 name = "lazy_static"
@@ -534,7 +612,7 @@ dependencies = [
 [[package]]
 name = "mina-curves"
 version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems#6af257b793d80f900675acc01b16fd4bf6375268"
+source = "git+https://github.com/o1-labs/proof-systems#106c6ddfa913dac683daf3369788808f0a75c4f9"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -636,7 +714,7 @@ dependencies = [
 [[package]]
 name = "o1-utils"
 version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems#6af257b793d80f900675acc01b16fd4bf6375268"
+source = "git+https://github.com/o1-labs/proof-systems#106c6ddfa913dac683daf3369788808f0a75c4f9"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -662,7 +740,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "oracle"
 version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems#6af257b793d80f900675acc01b16fd4bf6375268"
+source = "git+https://github.com/o1-labs/proof-systems#106c6ddfa913dac683daf3369788808f0a75c4f9"
 dependencies = [
  "ark-ec",
  "ark-ff",
@@ -697,7 +775,7 @@ dependencies = [
 [[package]]
 name = "plonk_circuits"
 version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems#6af257b793d80f900675acc01b16fd4bf6375268"
+source = "git+https://github.com/o1-labs/proof-systems#106c6ddfa913dac683daf3369788808f0a75c4f9"
 dependencies = [
  "ark-ff",
  "ark-poly",
@@ -715,13 +793,13 @@ dependencies = [
 [[package]]
 name = "plonk_protocol_dlog"
 version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems#6af257b793d80f900675acc01b16fd4bf6375268"
+source = "git+https://github.com/o1-labs/proof-systems#106c6ddfa913dac683daf3369788808f0a75c4f9"
 dependencies = [
  "ark-ec",
  "ark-ff",
  "ark-poly",
  "array-init 1.0.0",
- "colored",
+ "colored 1.9.3",
  "commitment_dlog",
  "mina-curves",
  "o1-utils",
@@ -730,7 +808,7 @@ dependencies = [
  "rand 0.8.4",
  "rand_core 0.6.3",
  "rayon",
- "sprs",
+ "sprs 0.7.1",
 ]
 
 [[package]]
@@ -870,6 +948,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rmp"
+version = "0.8.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f55e5fa1446c4d5dd1f5daeed2a4fe193071771a2636274d0d7a3b082aa7ad6"
+dependencies = [
+ "byteorder",
+ "num-traits 0.2.14",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "723ecff9ad04f4ad92fe1c8ca6c20d2196d9286e9c60727c4cb5511629260e9d"
+dependencies = [
+ "byteorder",
+ "rmp",
+ "serde",
+]
+
+[[package]]
 name = "rustc_version"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -993,6 +1092,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "smallvec"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ecab6c735a6bb4139c0caafd0cc3635748bbb3acf4550e8138122099251f309"
+
+[[package]]
 name = "sprs"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1002,6 +1107,21 @@ dependencies = [
  "ndarray",
  "num-complex",
  "num-traits 0.1.43",
+]
+
+[[package]]
+name = "sprs"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ed3b0e2c934e8eb2592a534134c1149869e4b2e55bd4086017d342be6afaea4"
+dependencies = [
+ "alga",
+ "ndarray",
+ "num-complex",
+ "num-traits 0.2.14",
+ "num_cpus",
+ "rayon",
+ "smallvec",
 ]
 
 [[package]]
