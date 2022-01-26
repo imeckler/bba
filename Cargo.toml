@@ -7,16 +7,19 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-oracle = { path = "./marlin/oracle" }
-groupmap = { path = "./marlin/zexe/groupmap" }
-algebra = { path = "./marlin/zexe/algebra", features = [ "parallel", "pasta", "asm" ] }
-commitment_dlog = { path = "./marlin/dlog/commitment" }
-plonk_5_wires_protocol_dlog = { path = "./marlin/dlog/plonk-5-wires" }
-plonk_5_wires_circuits = { path = "./marlin/circuits/plonk-5-wires" }
+ark-ff = { version = "0.3.0", features = ["parallel"] }
+ark-serialize = "0.3.0"
+ark-ec = { version = "0.3.0", features = ["parallel"] }
+ark-poly = { version = "0.3.0", features = ["parallel"] }
 
-ff-fft = { path = "./marlin/zexe/ff-fft" }
+# proof-systems
+commitment_dlog = { path = "./proof-systems/poly-commitment" }
+groupmap = { path = "./proof-systems/groupmap" }
+mina-curves = { path = "./proof-systems/curves" }
+oracle = { path = "./proof-systems/oracle" }
+kimchi = { path = "./proof-systems/kimchi" }
 
-rand_core = "0.5"
-array-init = "0.1.1"
+rand = { version = "0.8.0" }
+array-init = "2.0.0"
 
 rayon = { version = "1" }
