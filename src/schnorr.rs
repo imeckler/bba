@@ -1,9 +1,11 @@
-use algebra::{AffineCurve, BigInteger, PrimeField, ProjectiveCurve, UniformRand, Zero};
+use ark_ff::{BigInteger, PrimeField, UniformRand, Zero};
+use ark_ec::{AffineCurve, ProjectiveCurve};
 use array_init::array_init;
 use commitment_dlog::commitment::CommitmentCurve;
-use oracle::{poseidon::ArithmeticSpongeParams, poseidon_5_wires::*};
+use oracle::poseidon::*;
+use oracle::sponge::ScalarChallenge;
 
-use crate::{endo, random_oracle};
+use crate::random_oracle;
 
 pub trait CoordinateCurve: AffineCurve {
     fn to_coords(&self) -> Option<(Self::BaseField, Self::BaseField)>;
@@ -23,9 +25,10 @@ pub type Signature<G> = (
     <G as AffineCurve>::ScalarField,
 );
 
+// TODO: Remove the evenness check. not needed
 fn even<F: PrimeField>(x: F) -> bool {
-    let bits = x.into_repr().to_bits();
-    !bits[bits.len() - 1]
+    let bits = x.into_repr().to_bits_le();
+    !bits[0]
 }
 
 pub trait SignatureParams {
@@ -44,7 +47,7 @@ pub trait SignatureParams {
         let base = Self::G::prime_subgroup_generator();
         let pubkey = base.mul(d).into_affine();
         let (r, k) = {
-            let k_prime = <Self::G as AffineCurve>::ScalarField::rand(&mut rand_core::OsRng);
+            let k_prime = <Self::G as AffineCurve>::ScalarField::rand(&mut rand::thread_rng());
             let (r, ry) = base.mul(k_prime).into_affine().to_coords().unwrap();
             let k = if even(ry) { k_prime } else { -k_prime };
             (r, k)
@@ -90,12 +93,13 @@ where
     type G = G;
     type Message = G;
 
+    // TODO
     fn hash(&self, _pk: PublicKey<G>, m: G, r: G::BaseField) -> G::ScalarField {
         let (x, y) = m.to_coords().unwrap();
         let input = [x, y, r, G::BaseField::zero(), G::BaseField::zero()];
         let res = (0..random_oracle::POSEIDON_ROUNDS).fold(input, |prev, round| {
             let rc = &self.sponge.round_constants[round];
-            let s: [_; COLUMNS] = array_init(|j| sbox::<_, PlonkSpongeConstants>(prev[j]));
+            let s: [_; COLUMNS] = array_init(|j| sbox::<_, PlonkSpongeConstants15W>(prev[j]));
             array_init(|i| {
                 let m = &self.sponge.mds[i];
                 rc[i]
@@ -105,7 +109,7 @@ where
             })
         });
 
-        endo::EndoScalar(G::ScalarField::from_repr(pack(res[0].into_repr().as_ref())))
+        ScalarChallenge(G::ScalarField::from_repr(pack(res[0].into_repr().as_ref())).unwrap())
             .to_field(&self.endo)
     }
 }

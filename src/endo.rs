@@ -1,5 +1,6 @@
-use algebra::{BigInteger, PrimeField};
+use ark_ff::{BigInteger, PrimeField};
 
+/*
 #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
 pub struct EndoScalar<A: PrimeField>(pub A);
 
@@ -8,7 +9,7 @@ impl<F: PrimeField> EndoScalar<F> {
         let length_in_bits: usize = 256;
 
         let EndoScalar(x) = self;
-        let mut bits = x.into_repr().to_bits();
+        let mut bits = x.into_repr().to_bits_le();
         bits.reverse();
         assert_eq!(length_in_bits, bits.len());
 
@@ -35,3 +36,4 @@ impl<F: PrimeField> EndoScalar<F> {
         a * endo_coeff + &b
     }
 }
+ */

@@ -2,18 +2,19 @@ use rayon::prelude::*;
 use crate::bba_init_proof;
 use crate::bba_open_proof;
 use crate::bba_update_proof;
-use crate::endo::EndoScalar;
-use crate::fft::lagrange_commitments;
+// use crate::fft::lagrange_commitments;
 use crate::proof_system;
 use crate::schnorr;
-use algebra::{AffineCurve, PrimeField, ProjectiveCurve, UniformRand, VariableBaseMSM, Zero};
+use ark_ff::{PrimeField, SquareRootField, UniformRand, Zero};
+use ark_ec::{AffineCurve, ProjectiveCurve, msm::VariableBaseMSM};
 use array_init::array_init;
 use commitment_dlog::{
     commitment::{CommitmentCurve, PolyComm},
     srs::SRS,
 };
 use oracle::FqSponge;
-use plonk_5_wires_protocol_dlog::{
+use oracle::sponge::ScalarChallenge;
+use kimchi::{
     index::{Index, VerifierIndex},
     plonk_sponge::FrSponge,
     prover::ProverProof,
@@ -29,7 +30,7 @@ pub struct Params<G: AffineCurve> {
 
 pub struct Randomized<G: AffineCurve> {
     pub result: G,
-    pub witness: EndoScalar<G::ScalarField>,
+    pub witness: ScalarChallenge<G::ScalarField>,
 }
 
 pub const COUNTER_OFFSET: usize = bba_open_proof::PUBLIC_INPUT + proof_system::ZK_ROWS;
@@ -38,8 +39,8 @@ pub const MAX_COUNTERS: usize =
 
 impl<G: AffineCurve> Params<G> {
     pub fn randomize(&self, p: G) -> Randomized<G> {
-        let rng = &mut rand_core::OsRng;
-        let r = EndoScalar(G::ScalarField::rand(rng));
+        let rng = &mut rand::thread_rng();
+        let r = ScalarChallenge(G::ScalarField::rand(rng));
         let mask = self.h.mul(r.to_field(&self.endo));
         let result = (p.into_projective() + &mask).into_affine();
         Randomized { result, witness: r }
@@ -90,7 +91,7 @@ pub struct UpdateRequest<G: AffineCurve, Other: AffineCurve> {
 
 // size in bytes
 pub fn proof_size<G: CommitmentCurve>(proof: &ProverProof<G>) -> usize {
-    fn poly_comm<A>(pc: &PolyComm<A>) -> usize {
+    fn poly_comm<A: ark_serialize::CanonicalSerialize + ark_serialize::CanonicalDeserialize>(pc: &PolyComm<A>) -> usize {
         match &pc.shifted {
             None => pc.unshifted.len(),
             Some(_) => 1 + pc.unshifted.len(),
@@ -113,8 +114,6 @@ pub fn proof_size<G: CommitmentCurve>(proof: &ProverProof<G>) -> usize {
     // evaluations
     for e in proof.evals.iter() {
         field_elt_count += e.z.len();
-        field_elt_count += e.t.len();
-        field_elt_count += e.f.len();
         for v in e.w.iter() {
             field_elt_count += v.len();
         }
@@ -133,34 +132,34 @@ pub struct UpdateResponse<G: AffineCurve> {
     signature: schnorr::Signature<G>,
 }
 
-pub struct UpdateAuthority<'a, G: schnorr::CoordinateCurve, Other: CommitmentCurve> {
+pub struct UpdateAuthority<G: schnorr::CoordinateCurve, Other: CommitmentCurve> {
     pub signing_key: schnorr::PrivateKey<G>,
     pub signer: schnorr::Signer<G>,
     pub lgr_comms: Vec<G>,
-    pub update_vk: VerifierIndex<'a, Other>,
-    pub init_vk: VerifierIndex<'a, Other>,
+    pub update_vk: VerifierIndex<Other>,
+    pub init_vk: VerifierIndex<Other>,
     pub other_lgr_comms: Vec<PolyComm<Other>>,
     pub big_other_lgr_comms: Vec<PolyComm<Other>>,
     pub group_map: Other::Map,
 }
 
-pub struct UserProver<'a, G: CommitmentCurve, Other: CommitmentCurve> {
+pub struct UserProver<G: CommitmentCurve, Other: CommitmentCurve> {
     pub proof_system_constants: proof_system::Constants<Other::ScalarField>,
     pub group_map: Other::Map,
     pub g_group_map: G::Map,
-    pub init_pk: Index<'a, Other>,
-    pub update_pk: Index<'a, Other>,
-    pub open_pk: Index<'a, G>,
+    pub init_pk: Index<Other>,
+    pub update_pk: Index<Other>,
+    pub open_pk: Index<G>,
     pub update_params: bba_update_proof::Params<Other::ScalarField>,
     pub init_params: bba_init_proof::Params<G>,
     pub open_params: bba_open_proof::Params,
 }
 
-pub struct UserConfig<'a, G: CommitmentCurve, Other: CommitmentCurve> {
+pub struct UserConfig<G: CommitmentCurve, Other: CommitmentCurve> {
     pub signer: schnorr::Signer<G>,
     pub authority_public_key: schnorr::PublicKey<G>,
     pub bba: Params<G>,
-    pub prover: UserProver<'a, G, Other>,
+    pub prover: UserProver<G, Other>,
 }
 
 pub struct UserState<G: CommitmentCurve> {
@@ -175,9 +174,9 @@ pub struct UserState<G: CommitmentCurve> {
     pub pending_update_witness: Option<Randomized<G>>,
 }
 
-pub struct User<'a, C: proof_system::Cycle> {
+pub struct User<C: proof_system::Cycle> {
     //    G: CommitmentCurve, Other: CommitmentCurve
-    pub config: UserConfig<'a, C::Inner, C::Outer>,
+    pub config: UserConfig<C::Inner, C::Outer>,
     pub state: UserState<C::Inner>,
 }
 
@@ -201,7 +200,7 @@ impl<C: proof_system::Cycle> RewardOpening<C> {
         bba: &Params<C::Inner>,
         authority_public_key: C::Inner,
         group_map: &C::InnerMap,
-        vk: &VerifierIndex<'a, C::Inner>,
+        vk: &VerifierIndex<C::Inner>,
         openings: Vec<&Self>
     ) -> Result<(), String> {
         let lgr_comms: Vec<PolyComm<_>> = bba
@@ -245,7 +244,7 @@ impl<C: proof_system::Cycle> RewardOpening<C> {
         bba: &Params<C::Inner>,
         authority_public_key: C::Inner,
         group_map: &C::InnerMap,
-        vk: &VerifierIndex<'a, C::Inner>,
+        vk: &VerifierIndex<C::Inner>,
     ) -> Result<Payout<C>, &str> {
         let lgr_comms: Vec<PolyComm<_>> = bba
             .lagrange_commitments
@@ -303,7 +302,7 @@ fn update_delta<G: AffineCurve>(
 }
 
 pub fn init_secrets<G: AffineCurve>() -> bba_init_proof::Witness<G> {
-    let rng = &mut rand_core::OsRng;
+    let rng = &mut rand::thread_rng();
     bba_init_proof::Witness {
         r: G::ScalarField::rand(rng),
         c: G::ScalarField::rand(rng),
@@ -311,7 +310,7 @@ pub fn init_secrets<G: AffineCurve>() -> bba_init_proof::Witness<G> {
     }
 }
 
-impl<'a, C: proof_system::Cycle> User<'a, C> {
+impl<C: proof_system::Cycle> User<C> {
     pub fn check_invariant(&self) {
         let reward = self
             .state
@@ -348,17 +347,17 @@ impl<'a, C: proof_system::Cycle> User<'a, C> {
     }
 
     pub fn init(
-        config: UserConfig<'a, C::Inner, C::Outer>,
+        config: UserConfig<C::Inner, C::Outer>,
         secrets: bba_init_proof::Witness<C::Inner>,
         signature: schnorr::Signature<C::Inner>,
-    ) -> Result<Self, &str> {
+    ) -> Result<Self, String> {
         let acc = config.bba.secret_commitment(&secrets);
 
         if !config
             .signer
             .verify(config.authority_public_key, acc, signature)
         {
-            return Err("init signature failed to verify");
+            return Err("init signature failed to verify".to_string());
         }
 
         let counters = vec![0; MAX_COUNTERS];
@@ -465,12 +464,12 @@ impl<'a, C: proof_system::Cycle> User<'a, C> {
     }
 }
 
-impl<'a, G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
-    UserConfig<'a, G, Other>
+impl<G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
+    UserConfig<G, Other>
 where
-    G::BaseField: algebra::SquareRootField + algebra::PrimeField,
-    <Other as algebra::curves::AffineCurve>::Projective:
-        std::ops::MulAssign<<G as algebra::curves::AffineCurve>::BaseField>,
+    G::BaseField: SquareRootField + PrimeField,
+    <Other as AffineCurve>::Projective:
+        std::ops::MulAssign<<G as AffineCurve>::BaseField>,
 {
     pub fn request_init<
         EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,
@@ -495,7 +494,7 @@ where
     }
 }
 
-impl<'a, C: proof_system::Cycle> User<'a, C> {
+impl<C: proof_system::Cycle> User<C> {
     pub fn request_update<
         EFqSponge: Clone + FqSponge<C::OuterField, C::Outer, C::InnerField>,
         EFrSponge: FrSponge<C::InnerField>,
@@ -566,7 +565,10 @@ fn batch_verify_proofs<
 >(
     group_map: &G::Map,
     proofs: Vec<(&VerifierIndex<G>, &Vec<PolyComm<G>>, &ProverProof<G>)>,
-) -> Vec<bool> {
+) -> Vec<bool> 
+where
+G::BaseField: PrimeField
+{
     let verify = |ps: &Vec<_>| match ProverProof::verify::<EFqSponge, EFrSponge>(group_map, ps) {
         Ok(true) => true,
         Ok(false) => false,
@@ -576,12 +578,13 @@ fn batch_verify_proofs<
 }
 
 // This code would run on brave's server for instance
-impl<'a, G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
-    UpdateAuthority<'a, G, Other>
+impl<G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
+    UpdateAuthority<G, Other>
 where
-    G::BaseField: algebra::SquareRootField + algebra::PrimeField,
-    <Other as algebra::curves::AffineCurve>::Projective:
-        std::ops::MulAssign<<G as algebra::curves::AffineCurve>::BaseField>,
+    G::BaseField: SquareRootField + PrimeField,
+    Other::BaseField: PrimeField,
+    <Other as AffineCurve>::Projective:
+        std::ops::MulAssign<<G as AffineCurve>::BaseField>,
 {
     pub fn perform_init<
         EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,
@@ -687,12 +690,15 @@ where
     }
 }
 
-impl<G: CommitmentCurve> Params<G> {
-    pub fn new(srs: &SRS<G>, endo: G::ScalarField) -> Params<G> {
+impl<G: CommitmentCurve> Params<G> where G::BaseField: PrimeField {
+    pub fn new(srs: &mut SRS<G>, endo: G::ScalarField) -> Params<G> {
+        use ark_poly::EvaluationDomain;
+        let domain = ark_poly::Radix2EvaluationDomain::new(srs.g.len()).unwrap();
+        srs.add_lagrange_basis(domain);
         Params {
             h: srs.h,
             endo,
-            lagrange_commitments: lagrange_commitments(srs),
+            lagrange_commitments: srs.lagrange_bases.get(&srs.g.len()).unwrap().to_vec()
         }
     }
 }

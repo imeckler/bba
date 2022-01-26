@@ -1,3 +1,4 @@
+/*
 use algebra::{AffineCurve, FftField, Field, One, ProjectiveCurve};
 use commitment_dlog::{commitment::CommitmentCurve, srs::SRS};
 use ff_fft::{
@@ -144,3 +145,5 @@ pub fn lagrange_commitments<G: CommitmentCurve>(srs: &SRS<G>) -> Vec<G> {
     <G as AffineCurve>::Projective::batch_normalization(lg.as_mut_slice());
     lg.iter().map(|g| g.into_affine()).collect()
 }
+
+*/

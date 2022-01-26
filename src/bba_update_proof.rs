@@ -1,6 +1,7 @@
 use crate::proof_system::*;
 use crate::schnorr;
-use algebra::{AffineCurve, FftField, PrimeField};
+use ark_ff::{FftField, PrimeField};
+use ark_ec::{AffineCurve};
 use schnorr::CoordinateCurve;
 
 // Parameters for the update proof circuit.

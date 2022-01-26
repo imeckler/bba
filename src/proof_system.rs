@@ -1,25 +1,31 @@
 use crate::random_oracle;
-use algebra::{
+use mina_curves::{
     pasta::{fp::Fp, fq::Fq, pallas::Affine as Other, vesta::Affine},
-    AffineCurve, BigInteger, FftField, Field, One, PrimeField, ProjectiveCurve, SquareRootField,
+};
+use ark_ec::{
+    AffineCurve, ProjectiveCurve
+};
+use ark_ff::{
+    BigInteger, FftField, Field, One, PrimeField, SquareRootField,
     Zero,
 };
 use array_init::array_init;
 use commitment_dlog::{
     commitment::{ceil_log2, CommitmentCurve, PolyComm},
-    srs::{endos, SRSSpec, SRS},
+    srs::{endos, SRS},
 };
-use oracle::{poseidon::ArithmeticSpongeParams, poseidon_5_wires::*, FqSponge};
-use plonk_5_wires_circuits::{
+use oracle::{poseidon::ArithmeticSpongeParams, poseidon::*, FqSponge};
+use kimchi::circuits::{
     constraints::ConstraintSystem,
     gate::{CircuitGate, GateType},
     wires::Wire,
 };
-use plonk_5_wires_protocol_dlog::{index::Index, plonk_sponge::FrSponge, prover::ProverProof};
+use kimchi::{index::Index, plonk_sponge::FrSponge, prover::ProverProof};
 use std::collections::HashMap;
 
-pub const COLUMNS: usize = 5;
-pub const ZK_ROWS: usize = 5;
+pub const COLUMNS: usize = 15;
+pub const GENERICS: usize = 3;
+pub const ZK_ROWS: usize = 3;
 
 pub trait Cycle {
     type InnerField: FftField
@@ -138,11 +144,12 @@ pub struct WitnessGenerator<F> {
 
 type Row<V> = [V; COLUMNS];
 
-pub trait Cs<F: FftField> {
+pub trait Cs<F: FftField + PrimeField> {
     fn var<G>(&mut self, g: G) -> Var<F>
     where
         G: FnOnce() -> F;
 
+/*
     fn scalar<G, N: BigInteger>(&mut self, length: usize, g: G) -> Vec<Var<F>>
     where
         G: FnOnce() -> N,
@@ -166,6 +173,7 @@ pub trait Cs<F: FftField> {
         }
         res
     }
+ */
 
     fn gate(&mut self, g: GateSpec<F>);
 
@@ -181,7 +189,7 @@ pub trait Cs<F: FftField> {
             }
         });
 
-        let mut c = vec![F::zero(); COLUMNS + 2];
+        let mut c = vec![F::zero(); GENERICS + 2];
         c[0] = F::one();
         c[1] = -F::one();
 
@@ -195,9 +203,9 @@ pub trait Cs<F: FftField> {
     fn constant(&mut self, x: F) -> Var<F> {
         let v = self.var(|| x);
 
-        let mut c = vec![F::zero(); COLUMNS + 2];
+        let mut c = vec![F::zero(); GENERICS + 2];
         c[0] = F::one();
-        c[COLUMNS + 1] = -x;
+        c[GENERICS + 1] = -x;
 
         let row = array_init(|i| {
             if i == 0 {
@@ -215,16 +223,17 @@ pub trait Cs<F: FftField> {
         v
     }
 
+    // TODO
     fn scale(&mut self, x: F, v: Var<F>) -> Var<F> {
         let xv = self.var(|| v.val() * x);
-        let row = [
-            v,
-            xv,
-            self.var(|| F::zero()),
-            self.var(|| F::zero()),
-            self.var(|| F::zero()),
-        ];
-        let mut c = vec![F::zero(); COLUMNS + 2];
+        let row = {
+            let mut row: [_; COLUMNS] = array_init(|_| self.var(|| F::zero()));
+            row[0] = v;
+            row[1] = xv;
+            row
+        };
+
+        let mut c = vec![F::zero(); GENERICS + 2];
         c[0] = x;
         c[1] = -F::one();
         self.gate(GateSpec {
@@ -235,74 +244,126 @@ pub trait Cs<F: FftField> {
         xv
     }
 
-    fn double(&mut self, (x1, y1): (Var<F>, Var<F>)) -> (Var<F>, Var<F>) {
-        let y1_inv = self.var(|| y1.val().inverse().unwrap());
-
-        let mut r = None;
-        let x2 = self.var(|| {
-            let p = (x1.val(), y1.val());
-            let pp = add_points(p, p);
-            r = Some(pp);
-            pp.0
+    fn add_group(&mut self, zero: Var<F>, (x1, y1): (Var<F>, Var<F>), (x2, y2): (Var<F>, Var<F>)) -> (Var<F>, Var<F>) {
+        let mut same_x_bool = false;
+        let same_x = self.var(|| {
+            let same_x = x1.val() == x2.val();
+            same_x_bool = same_x;
+            F::from(same_x as u64)
         });
-        let y2 = self.var(|| r.unwrap().1);
-        drop(r);
 
-        self.gate(GateSpec {
-            typ: GateType::Double,
-            row: [x1, y1, x2, y2, y1_inv],
-            c: vec![],
+        let inf = zero;
+        let x21_inv = self.var(|| {
+            if x1.val() == x2.val() {
+                F::zero()
+            } else {
+                (x2.val() - x1.val()).inverse().unwrap()
+            }
         });
-        (x2, y2)
-    }
 
-    fn assert_add_group(&mut self, (x1, y1): (Var<F>, Var<F>), (x2, y2): (Var<F>, Var<F>), (x3, y3): (Var<F>, Var<F>)) {
-        let inv = self.var(|| (x2.val() - x1.val()).inverse().unwrap());
-        self.gate(GateSpec {
-            typ: GateType::Add,
-            row: [x1, y1, x2, y2, inv],
-            c: vec![],
+        let s = self.var(|| {
+            if same_x_bool {
+                let x1_squared = x1.val().square();
+                (x1_squared.double() + x1_squared).div(y1.val().double())
+            } else {
+                (y2.val() - y1.val()) * x21_inv.val()
+            }
         });
-        let row2 = [
-            x3,
-            y3,
-            self.var(|| F::zero()),
-            self.var(|| F::zero()),
-            self.var(|| F::zero()),
-        ];
-        self.gate(GateSpec {
-            typ: GateType::Zero,
-            row: row2,
-            c: vec![],
-        });
-    }
 
-    fn add_group(&mut self, (x1, y1): (Var<F>, Var<F>), (x2, y2): (Var<F>, Var<F>)) -> (Var<F>, Var<F>) {
-        let mut r = None;
+        let inf_z = self.var(|| {
+            if y1.val() == y2.val() {
+                F::zero()
+            } else if same_x_bool {
+                (y2.val() - y1.val()).inverse().unwrap()
+            } else {
+                F::zero()
+            }
+        });
+
         let x3 = self.var(|| {
-            let pq = add_points((x1.val(), y1.val()), (x2.val(), y2.val()));
-            r = Some(pq);
-            pq.0
+            s.val().square() - (x1.val() + x2.val())
         });
-        let y3 = self.var(|| r.unwrap().1);
 
-        drop(r);
+        let y3 = self.var(|| {
+            s.val() * (x1.val() - x3.val()) - y1.val()
+        });
 
-        self.assert_add_group((x1, y1), (x2, y2), (x3, y3));
-
+        self.gate(GateSpec {
+            typ: GateType::CompleteAdd,
+            row: [x1, y1, x2, y2, x3, y3, inf, same_x, s, inf_z, x21_inv, 
+                zero, zero, zero, zero],
+            c: vec![],
+        });
         (x3, y3)
     }
 
+    fn double(&mut self, zero: Var<F>, (x1, y1): (Var<F>, Var<F>)) -> (Var<F>, Var<F>) {
+        self.add_group(zero, (x1, y1), (x1, y1))
+    }
+
+    fn assert_add_group(&mut self, zero: Var<F>, (x1, y1): (Var<F>, Var<F>), (x2, y2): (Var<F>, Var<F>), (x3, y3): (Var<F>, Var<F>)) {
+        let mut same_x_bool = false;
+        let same_x = self.var(|| {
+            let same_x = x1.val() == x2.val();
+            same_x_bool = same_x;
+            F::from(same_x as u64)
+        });
+
+        let inf = zero;
+        let x21_inv = self.var(|| {
+            if x1.val() == x2.val() {
+                F::zero()
+            } else {
+                (x2.val() - x1.val()).inverse().unwrap()
+            }
+        });
+
+        let s = self.var(|| {
+            if same_x_bool {
+                let x1_squared = x1.val().square();
+                (x1_squared.double() + x1_squared).div(y1.val().double())
+            } else {
+                (y2.val() - y1.val()) * x21_inv.val()
+            }
+        });
+
+        let inf_z = self.var(|| {
+            if y1.val() == y2.val() {
+                F::zero()
+            } else if same_x_bool {
+                (y2.val() - y1.val()).inverse().unwrap()
+            } else {
+                F::zero()
+            }
+        });
+
+        self.gate(GateSpec {
+            typ: GateType::CompleteAdd,
+            row: [x1, y1, x2, y2, x3, y3, inf, same_x, s, inf_z, x21_inv, 
+                zero, zero, zero, zero],
+            c: vec![],
+        });
+    }
+
+    // TODO
     fn cond_select(&mut self, b: Var<F>, t: Var<F>, f: Var<F>) -> Var<F> {
-        // Could maybe be more efficient
+        // Could be more efficient. Currently uses three constraints :(
         // delta = t - f
-        // res = f + b * delta
+        // res1 = b * delta
+        // res = res1 + f
 
         let delta = self.var(|| t.val() - f.val());
-        let res = self.var(|| f.val() + b.val() * delta.val());
+        let res1 = self.var(|| b.val() * delta.val());
+        let res = self.var(|| f.val() + res1.val());
 
-        let row1 = [t, f, delta, self.var(|| F::zero()), self.var(|| F::zero())];
-        let mut c1 = vec![F::zero(); COLUMNS + 2];
+        let row1 = {
+            let mut r = array_init(|_| self.var(|| F::zero()));
+            r[0] = t;
+            r[1] = f;
+            r[2] = delta;
+            r
+        };
+        let mut c1 = vec![F::zero(); GENERICS + 2];
         c1[0] = F::one();
         c1[1] = -F::one();
         c1[2] = -F::one();
@@ -312,191 +373,227 @@ pub trait Cs<F: FftField> {
             c: c1,
         });
 
-        let row2 = [b, delta, f, res, self.var(|| F::zero())];
-        let one = F::one();
-        let z = F::zero();
-        let c2 = vec![z, z, one, -one, z, one, z];
+        let row2 = {
+            let mut r = array_init(|_| self.var(|| F::zero()));
+            r[0] = b;
+            r[1] = delta;
+            r[2] = res1;
+            r
+        };
+        let mut c2 = vec![F::zero(); GENERICS + 2];
+        c2[0] = F::zero();
+        c2[1] = F::zero();
+        c2[2] = -F::one();
+        c2[3] = F::one();
+
         self.gate(GateSpec {
             typ: GateType::Generic,
             row: row2,
             c: c2,
         });
+
+        let row3 = {
+            let mut r = array_init(|_| self.var(|| F::zero()));
+            r[0] = res1;
+            r[1] = f;
+            r[2] = res;
+            r
+        };
+        let mut c3 = vec![F::zero(); GENERICS + 2];
+        c3[0] = F::one();
+        c3[1] = F::one();
+        c3[2] = -F::one();
+
+        self.gate(GateSpec {
+            typ: GateType::Generic,
+            row: row3,
+            c: c3,
+        });
+
+
         res
     }
 
-    fn scalar_mul(&mut self, (xt, yt): (Var<F>, Var<F>), bits: Vec<Var<F>>) -> (Var<F>, Var<F>) {
-        let (mut xp, mut yp) = self.double((xt, yt));
-        // xt yt s1 s2 b
-        // xs ys xp yp _
-        for i in (0..bits.len() - 1).rev() {
-            let b = bits[i + 1];
-            let yq = self.var(|| {
-                if b.val().is_zero() {
-                    -yt.val()
-                } else {
-                    yt.val()
-                }
-            });
+    // TODO
+    fn scalar_mul(&mut self, (xt, yt): (Var<F>, Var<F>), scalar: Var<F>) -> (Var<F>, Var<F>) {
+        let num_rows = 255 / 5;
+        let mut witness = vec![];
 
-            let (xs, ys) = {
-                let mut s = None;
-                let xs = self.var(|| {
-                    let p = (xp.val(), yp.val());
-                    let s_pt = add_points(add_points((xt.val(), yq.val()), p), p);
-                    s = Some(s_pt);
-                    s_pt.0
-                });
-                let ys = self.var(|| s.unwrap().1);
-                (xs, ys)
-            };
-
-            let s1 = self.var(|| (yq.val() - &yp.val()) / &(xt.val() - &xp.val()));
-            let s2 = self.var(|| (ys.val() + &yp.val()) / &(xp.val() - &xs.val()));
-
-            self.gate(GateSpec {
-                typ: GateType::Vbmul1,
-                row: [xt, yt, s1, s2, b],
-                c: vec![],
-            });
-            let z = self.var(|| F::zero());
-            self.gate(GateSpec {
-                typ: GateType::Zero,
-                row: [xs, ys, xp, yp, z],
-                c: vec![],
-            });
-
-            xp = xs;
-            yp = ys;
-        }
-
-        let neg_t = (xt, self.scale(-F::one(), yt));
-        let (xr, yr) = self.add_group((xp, yp), neg_t);
-
-        let mut bool0_row = [self.var(|| F::zero()); COLUMNS];
-        bool0_row[0] = bits[0];
-        bool0_row[1] = bits[0];
-        self.gate(GateSpec {
-            typ: GateType::Generic,
-            row: bool0_row,
-            c: vec![
-                F::one(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                -F::one(),
-                F::zero(),
-            ],
+        let _ = self.var(|| {
+            witness = vec![vec![F::zero(); num_rows]; COLUMNS];
+            kimchi::circuits::polynomials::varbasemul::witness(
+                &witness,
+                0, (xt.val(), yt.val()), bits, );
+            F::zero()
         });
-        (
-            self.cond_select(bits[0], xp, xr),
-            self.cond_select(bits[0], yp, yr),
-        )
-    }
 
+
+
+        panic!("")
+    }
+    
     fn endo(
         &mut self,
+        zero: Var<F>,
         constants: &Constants<F>,
         (xt, yt): (Var<F>, Var<F>),
-        bits: Vec<Var<F>>,
-    ) -> (Var<F>, Var<F>) {
-        let endo = constants.endo;
+        scalar: Var<F>) -> (Var<F>, Var<F>) {
+        let bits_length = 128;
+        let bits_per_row = 4;
+        let rows = bits_length / 4;
+        assert_eq!(0, bits_length % 4);
 
-        // 2(phi(p) + p)
-        let (mut xp, mut yp) = {
+        let mut bits_ = vec![];
+        let bits: Vec<_> = (0..bits_length).map(|i| {
+            self.var(|| {
+                if bits_.len() == 0 {
+                    bits_ = scalar.val().into_repr().to_bits_le().iter().take(bits_length).map(|x| *x).rev().collect()
+                }
+                F::from(bits_[i] as u64)
+            })
+        }).collect();
+
+        let one = F::one();
+
+        let endo = constants.endo;
+        let mut acc = {
             let phip = (self.scale(endo, xt), yt);
-            let phip_p = self.add_group(phip, (xt, yt));
-            self.double(phip_p)
+            let phip_p = self.add_group(zero, phip, (xt, yt));
+            self.double(zero, phip_p)
         };
 
-        for i in (0..128).rev() {
-            let b_2i = bits[2 * i];
-            let b_2i1 = bits[2 * i + 1];
-            let xq = self.var(|| (F::one() + (endo - F::one()) * b_2i1.val()) * xt.val());
-            let yq = self.var(|| (b_2i.val().double() - F::one()) * yt.val());
+        let mut n_acc = zero;
 
-            let mut p = None;
-            let xs = self.var(|| {
-                let r = add_points(
-                    add_points((xq.val(), yq.val()), (xp.val(), yp.val())),
-                    (xp.val(), yp.val()),
-                );
-                p = Some(r);
-                r.0
-            });
-            let ys = self.var(|| p.unwrap().1);
-            drop(p);
+        // TODO: Could be more efficient
+        for i in 0..rows {
+            let b1 = bits[i * bits_per_row];
+            let b2 = bits[i * bits_per_row + 1];
+            let b3 = bits[i * bits_per_row + 2];
+            let b4 = bits[i * bits_per_row + 3];
 
-            let s1 = self.var(|| (yq.val() - &yp.val()) / &(xq.val() - &xp.val()));
-            let s2 = self.var(|| (ys.val() + &yp.val()) / &(xp.val() - &xs.val()));
+            let (xp, yp) = acc;
+
+            let xq1 = self.var(|| (one + (endo - one) * b1.val()) * xt.val());
+            let yq1 = self.var(|| (b2.val().double() - one) * yt.val());
+
+            let s1 = self.var(|| (yq1.val() - yp.val()) / (xq1.val() - xp.val()));
+            let s1_squared = self.var(|| s1.val().square());
+            // (2*xp – s1^2 + xq) * ((xp – xr) * s1 + yr + yp) = (xp – xr) * 2*yp
+            // => 2 yp / (2*xp – s1^2 + xq) = s1 + (yr + yp) / (xp – xr)
+            // => 2 yp / (2*xp – s1^2 + xq) - s1 = (yr + yp) / (xp – xr)
+            //
+            // s2 := 2 yp / (2*xp – s1^2 + xq) - s1
+            //
+            // (yr + yp)^2 = (xp – xr)^2 * (s1^2 – xq1 + xr)
+            // => (s1^2 – xq1 + xr) = (yr + yp)^2 / (xp – xr)^2
+            //
+            // => xr = s2^2 - s1^2 + xq
+            // => yr = s2 * (xp - xr) - yp
+            let s2 = self.var(|| yp.val().double() / (xp.val().double() + xq1.val() - s1_squared.val()) - s1.val());
+
+            // (xr, yr)
+            let xr = self.var(|| xq1.val() + s2.val().square() - s1_squared.val());
+            let yr = self.var(|| (xp.val() - xr.val()) * s2.val() - yp.val());
+
+            let xq2 = self.var(|| (one + (endo - one) * b3.val()) * xt.val());
+            let yq2 = self.var(|| (b4.val().double() - one) * yt.val());
+            let s3 = self.var(|| (yq2.val() - yr.val()) / (xq2.val() - xr.val()));
+            let s3_squared = self.var(|| s3.val().square());
+            let s4 = self.var(|| yr.val().double() / (xr.val().double() + xq2.val() - s3_squared.val()) - s3.val());
+
+            let xs = self.var(|| xq2.val() + s4.val().square() - s3_squared.val());
+            let ys = self.var(|| (xr.val() - xs.val()) * s4.val() - yr.val());
+
             self.gate(GateSpec {
-                typ: GateType::Endomul,
-                row: [xt, yt, s1, s2, b_2i],
+                typ: GateType::EndoMul,
+                row: [xt, yt, zero, zero, xp, yp, n_acc, xr, yr, s1, s3, b1, b2, b3, b4],
                 c: vec![],
             });
-            self.gate(GateSpec {
-                typ: GateType::Zero,
-                row: [xs, ys, xp, yp, b_2i1],
-                c: vec![],
-            });
 
-            xp = xs;
-            yp = ys;
+            acc = (xs, ys);
+            
+            n_acc = self.var(|| {
+                let mut n_acc = n_acc.val();
+                n_acc.double_in_place();
+                n_acc += b1.val();
+                n_acc.double_in_place();
+                n_acc += b2.val();
+                n_acc.double_in_place();
+                n_acc += b3.val();
+                n_acc.double_in_place();
+                n_acc += b4.val();
+                n_acc
+            });
         }
-        (xp, yp)
-    }
-
-    fn assert_pack(&mut self, x: Var<F>, bits_lsb: &Vec<Var<F>>) {
-        let z = self.constant(F::zero());
-        let init = [z, z, z, z, z];
-        self.gate(GateSpec {
-            typ: GateType::Pack,
-            row: init,
-            c: vec![],
-        });
-
-        assert_eq!(bits_lsb.len(), 256);
-        let mut bits_msb = bits_lsb.clone();
-        bits_msb.reverse();
-        let mut acc = z;
-        for k in 0..63 {
-            let new_acc = self.var(|| {
-                bits_msb[4 * k + 3].val()
-                    + &bits_msb[4 * k + 2].val().double()
-                    + &bits_msb[4 * k + 1].val().double().double()
-                    + &bits_msb[4 * k].val().double().double().double()
-                    + &acc.val().double().double().double().double()
-            });
-            self.gate(GateSpec {
-                typ: GateType::Pack,
-                c: vec![],
-                row: [
-                    bits_msb[4 * k],
-                    bits_msb[4 * k + 1],
-                    bits_msb[4 * k + 2],
-                    bits_msb[4 * k + 3],
-                    new_acc,
-                ],
-            });
-            acc = new_acc;
-        }
-        let k = 63;
         self.gate(GateSpec {
             typ: GateType::Zero,
-            c: vec![],
-            row: [
-                bits_msb[4 * k],
-                bits_msb[4 * k + 1],
-                bits_msb[4 * k + 2],
-                bits_msb[4 * k + 3],
-                x,
-            ],
+            row: [zero, zero, zero, zero, acc.0, acc.1, scalar, zero, zero, zero, zero, zero, zero, zero, zero],
+            c: vec![]
         });
+        acc
     }
 
+    fn assert_pack(&mut self, zero: Var<F>, x: Var<F>, bits_lsb: &Vec<Var<F>>) {
+        let crumbs_per_row = 8;
+        let bits_per_row = 2 * crumbs_per_row;
+        assert_eq!(bits_lsb.len() % bits_per_row, 0);
+        let num_rows = bits_lsb.len() / bits_per_row;
+
+        let bits_msb: Vec<_> = bits_lsb.iter().rev().collect();
+
+        let mut a = self.var(|| F::from(2u64));
+        let mut b = self.var(|| F::from(2u64));
+        let mut n = zero;
+
+        let one = F::one();
+        let neg_one = -one;
+
+        for (i, row_bits) in bits_msb[..].chunks(bits_per_row).enumerate() {
+            let mut row: [Var<F>; COLUMNS] = array_init(|_| self.var(|| F::zero()));
+            row[0] = n;
+            row[2] = a;
+            row[3] = b;
+
+            for (j, crumb_bits) in row_bits.chunks(2).enumerate() {
+                let b0 = crumb_bits[1];
+                let b1 = crumb_bits[0];
+
+                let crumb = self.var(|| b0.val() + b1.val().double());
+                row[6 + j] = crumb;
+
+                a = self.var(|| {
+                    let x = a.val().double();
+                    if b1.val().is_zero() {
+                        x
+                    } else {
+                        x + if b0.val().is_one() { one } else { neg_one }
+                    }
+                });
+
+                b = self.var(|| {
+                    let x = b.val().double();
+                    if b1.val().is_zero() {
+                        x + if b0.val().is_one() { one } else { neg_one }
+                    } else {
+                        x
+                    }
+                });
+
+                n = self.var(|| n.val().double().double() + crumb.val());
+            }
+
+            row[1] = if i == num_rows - 1 { x } else { n };
+            row[4] = a;
+            row[5] = b;
+
+            row[14] = self.var(|| F::zero());
+        }
+    }
+
+    // TODO
     fn zk(&mut self) {
         for _ in 0..ZK_ROWS {
-            let row = array_init(|_| self.var(|| F::rand(&mut rand_core::OsRng)));
+            let row = array_init(|_| self.var(|| F::rand(&mut rand::thread_rng())));
             self.gate(GateSpec {
                 typ: GateType::Zero,
                 c: vec![],
@@ -505,6 +602,7 @@ pub trait Cs<F: FftField> {
         }
     }
 
+    // TODO
     fn poseidon(&mut self, constants: &Constants<F>, input: Row<Var<F>>) -> Row<Var<F>> {
         let params = &constants.poseidon;
         let res = (0..random_oracle::POSEIDON_ROUNDS).fold(input.clone(), |prev, round| {
@@ -515,7 +613,7 @@ pub trait Cs<F: FftField> {
                 self.var(|| {
                     // TODO: Lift out
                     let this: [F; COLUMNS] =
-                        array_init(|j| sbox::<F, PlonkSpongeConstants>(prev[j].value.unwrap()));
+                        array_init(|j| sbox::<F, PlonkSpongeConstants15W>(prev[j].value.unwrap()));
                     rc[i]
                         + &this
                             .iter()
@@ -571,7 +669,7 @@ fn bool_to_field<F: Field>(b: bool) -> F {
     }
 }
 
-impl<F: FftField> Cs<F> for WitnessGenerator<F> {
+impl<F: FftField + PrimeField> Cs<F> for WitnessGenerator<F> {
     fn var<G>(&mut self, g: G) -> Var<F>
     where
         G: FnOnce() -> F,
@@ -599,7 +697,7 @@ impl<F: FftField> WitnessGenerator<F> {
     }
 }
 
-impl<F: FftField> Cs<F> for System<F> {
+impl<F: FftField + PrimeField> Cs<F> for System<F> {
     fn var<G>(&mut self, _: G) -> Var<F> {
         let v = self.next_variable;
         self.next_variable += 1;
@@ -633,7 +731,6 @@ impl<F: FftField> System<F> {
                 }
             });
             let g = CircuitGate {
-                row: i,
                 typ: gs.typ.clone(),
                 c: gs.c.clone(),
                 wires,
@@ -657,7 +754,7 @@ pub fn prove<
     EFqSponge: Clone + FqSponge<G::BaseField, G, G::ScalarField>,
     EFrSponge: FrSponge<G::ScalarField>,
 >(
-    index: &Index<'a, G>,
+    index: &Index<G>,
     group_map: &G::Map,
     blinders: Option<[Option<G::ScalarField>; COLUMNS]>,
     public_input: Vec<G::ScalarField>,
@@ -665,6 +762,7 @@ pub fn prove<
 ) -> ProverProof<G>
 where
     H: FnOnce(&mut WitnessGenerator<G::ScalarField>, Vec<Var<G::ScalarField>>) -> (),
+    G::BaseField : PrimeField,
 {
     let mut gen: WitnessGenerator<G::ScalarField> = WitnessGenerator {
         rows: public_input
@@ -706,7 +804,7 @@ pub fn generate_proving_key<'a, C: Cycle, H>(
     poseidon_params: &ArithmeticSpongeParams<C::OuterField>,
     public: usize,
     main: H,
-) -> Index<'a, C::Outer>
+) -> Index<C::Outer>
 where
     H: FnOnce(&mut System<C::InnerField>, Vec<Var<C::InnerField>>) -> (),
 {
@@ -746,7 +844,7 @@ where
             .unwrap(),
         poseidon_params.clone(),
         endo_q,
-        SRSSpec::Use(&srs),
+        srs
     )
 }
 

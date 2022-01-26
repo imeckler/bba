@@ -1,11 +1,16 @@
-use algebra::{
+use mina_curves::{
     pasta::{
         fp::Fp,
         fq::Fq,
         pallas::{Affine as Other, PallasParameters},
         vesta::{Affine, VestaParameters},
     },
-    AffineCurve, ProjectiveCurve, UniformRand,
+};
+use ark_ec::{
+    AffineCurve, ProjectiveCurve,
+};
+use ark_ff::{
+     UniformRand,
 };
 use array_init::array_init;
 use commitment_dlog::{
@@ -14,9 +19,10 @@ use commitment_dlog::{
 };
 use groupmap::GroupMap;
 use oracle::{
-    poseidon_5_wires::*,
-    sponge_5_wires::{DefaultFqSponge, DefaultFrSponge},
+    poseidon::*,
+    sponge::{DefaultFqSponge, DefaultFrSponge},
 };
+use ark_poly::{Radix2EvaluationDomain as D};
 
 mod bba;
 mod bba_init_proof;
@@ -33,11 +39,11 @@ use util::*;
 
 use schnorr::*;
 
-type SpongeQ = DefaultFqSponge<VestaParameters, PlonkSpongeConstants>;
-type SpongeR = DefaultFrSponge<Fp, PlonkSpongeConstants>;
+type SpongeQ = DefaultFqSponge<VestaParameters, PlonkSpongeConstants15W>;
+type SpongeR = DefaultFrSponge<Fp, PlonkSpongeConstants15W>;
 
-type PSpongeQ = DefaultFqSponge<PallasParameters, PlonkSpongeConstants>;
-type PSpongeR = DefaultFrSponge<Fq, PlonkSpongeConstants>;
+type PSpongeQ = DefaultFqSponge<PallasParameters, PlonkSpongeConstants15W>;
+type PSpongeR = DefaultFrSponge<Fq, PlonkSpongeConstants15W>;
 
 fn main() {
     let (_endo_q, endo_r) = endos::<Other>();
@@ -47,7 +53,7 @@ fn main() {
     };
     {
         let m = Other::prime_subgroup_generator();
-        let k = <Other as AffineCurve>::ScalarField::rand(&mut rand_core::OsRng);
+        let k = <Other as AffineCurve>::ScalarField::rand(&mut rand::thread_rng());
         let pubkey = Other::prime_subgroup_generator().mul(k).into_affine();
         let s = signer.sign(k, m);
         assert!(signer.verify(pubkey, m, s));
@@ -73,7 +79,7 @@ fn main() {
         let start = std::time::Instant::now();
         // Defining global parameters and performing one-time setup
 
-        let brave_sk = <Other as AffineCurve>::ScalarField::rand(&mut rand_core::OsRng);
+        let brave_sk = <Other as AffineCurve>::ScalarField::rand(&mut rand::thread_rng());
         let brave_pubkey = Other::prime_subgroup_generator()
             .mul(brave_sk)
             .into_affine();
@@ -139,21 +145,11 @@ fn main() {
         );
         let open_vk = open_pk.verifier_index();
 
-        let other_lgr_comms: Vec<PolyComm<Affine>> = fft::lagrange_commitments(&srs)
-            .iter()
-            .map(|g| PolyComm {
-                unshifted: vec![*g],
-                shifted: None,
-            })
-            .collect();
+        srs.add_lagrange_basis( D::new(srs.g.len()));
+        let other_lgr_comms = srs.lagrange_bases.get(&srs.g.len()).unwrap();
 
-        let big_other_lgr_comms: Vec<PolyComm<Affine>> = fft::lagrange_commitments(&big_srs)
-            .iter()
-            .map(|g| PolyComm {
-                unshifted: vec![*g],
-                shifted: None,
-            })
-            .collect();
+        big_srs.add_lagrange_basis( D::new(big_srs.g.len()));
+        let big_other_lgr_comms = srs.lagrange_bases.get(&big_srs.g.len()).unwrap();
 
         // End of setup
         println!(
