@@ -23,3 +23,5 @@ rand = { version = "0.8.0" }
 array-init = "2.0.0"
 
 rayon = { version = "1" }
+
+itertools = "0.10.3"
