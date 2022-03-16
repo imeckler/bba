@@ -1,28 +1,24 @@
-use mina_curves::{
-    pasta::{
-        fp::Fp,
-        fq::Fq,
-        pallas::{Affine as Other, PallasParameters},
-        vesta::{Affine, VestaParameters},
-    },
-};
-use ark_ec::{
-    AffineCurve, ProjectiveCurve,
-};
-use ark_ff::{
-     UniformRand,
-};
+use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ff::UniformRand;
+use ark_poly::{EvaluationDomain, Radix2EvaluationDomain as D};
 use array_init::array_init;
 use commitment_dlog::{
-    commitment::{ceil_log2, CommitmentCurve, PolyComm},
+    commitment::{ceil_log2, CommitmentCurve},
     srs::{endos, SRS},
+    PolyComm,
 };
 use groupmap::GroupMap;
+use mina_curves::pasta::{
+    fp::Fp,
+    fq::Fq,
+    pallas::{Affine as Other, PallasParameters},
+    vesta::{Affine, VestaParameters},
+};
 use oracle::{
     poseidon::*,
     sponge::{DefaultFqSponge, DefaultFrSponge},
 };
-use ark_poly::{Radix2EvaluationDomain as D};
+use std::sync::Arc;
 
 mod bba;
 mod bba_init_proof;
@@ -31,7 +27,6 @@ mod bba_update_proof;
 mod endo;
 mod fft;
 mod proof_system;
-mod random_oracle;
 mod schnorr;
 mod util;
 use proof_system::*;
@@ -59,9 +54,18 @@ fn main() {
         assert!(signer.verify(pubkey, m, s));
     }
 
-    let other_srs = SRS::<Other>::create(1 << ceil_log2(bba::MAX_COUNTERS));
-    let srs = SRS::<Affine>::create(1 << 11);
-    let big_srs = SRS::<Affine>::create(1 << 12);
+    let mut srs = SRS::<Affine>::create(1 << 9);
+    srs.add_lagrange_basis(D::new(srs.g.len()).unwrap());
+    let srs = Arc::new(srs);
+
+    let mut big_srs = SRS::<Affine>::create(1 << 10);
+    big_srs.add_lagrange_basis(D::new(big_srs.g.len()).unwrap());
+    let big_srs = Arc::new(big_srs);
+
+    let mut other_srs = SRS::<Other>::create(1 << ceil_log2(bba::MAX_COUNTERS));
+    other_srs.add_lagrange_basis(D::new(other_srs.g.len()).unwrap());
+    let other_srs = Arc::new(other_srs);
+
     let group_map = <Affine as CommitmentCurve>::Map::setup();
     let g_group_map = <Other as CommitmentCurve>::Map::setup();
 
@@ -69,12 +73,12 @@ fn main() {
     let fq_proof_system_constants = fq_constants();
 
     {
-        let args : Vec<_> = std::env::args().collect();
+        let args: Vec<_> = std::env::args().collect();
         if args.len() < 3 {
             println!("Usage: cargo run --release -- NUMBER_OF_ACCUMULATORS_TO_UPDATE COUNTERS_TO_UPDATE_PER_ACCUMULATOR")
         }
-        let accumulators_to_update : usize = args[1].parse().unwrap();
-        let updates_per_accumulator : u32 = args[2].parse().unwrap();
+        let accumulators_to_update: usize = args[1].parse().unwrap();
+        let updates_per_accumulator: u32 = args[2].parse().unwrap();
 
         let start = std::time::Instant::now();
         // Defining global parameters and performing one-time setup
@@ -84,7 +88,7 @@ fn main() {
             .mul(brave_sk)
             .into_affine();
 
-        let bba = bba::Params::new(&other_srs, endo_r);
+        let bba = bba::Params::new(other_srs.clone(), endo_r);
 
         let init_params = bba_init_proof::Params {
             lagrange_commitments: array_init(|i| bba.lagrange_commitments[i]),
@@ -101,16 +105,24 @@ fn main() {
         let fp_poseidon = oracle::pasta::fp5::params();
 
         let init_pk = generate_proving_key::<FpInner, _>(
-            &big_srs,
+            big_srs.clone(),
             &proof_system_constants,
             &fq_poseidon,
             2,
-            |sys, p| bba_init_proof::circuit::<_, Other, _>(&init_params, &None, sys, p),
+            |sys, p| {
+                bba_init_proof::circuit::<_, Other, _>(
+                    &proof_system_constants,
+                    &init_params,
+                    &None,
+                    sys,
+                    p,
+                )
+            },
         );
         let init_vk = init_pk.verifier_index();
 
         let update_pk = generate_proving_key::<FpInner, _>(
-            &srs,
+            srs.clone(),
             &proof_system_constants,
             &fq_poseidon,
             2,
@@ -137,7 +149,7 @@ fn main() {
         };
 
         let open_pk = generate_proving_key::<FqInner, _>(
-            &other_srs,
+            other_srs.clone(),
             &fq_proof_system_constants,
             &fp_poseidon,
             2,
@@ -145,11 +157,29 @@ fn main() {
         );
         let open_vk = open_pk.verifier_index();
 
-        srs.add_lagrange_basis( D::new(srs.g.len()));
-        let other_lgr_comms = srs.lagrange_bases.get(&srs.g.len()).unwrap();
+        // TODO: Don't need to copy all this data
+        let other_lgr_comms = srs
+            .lagrange_bases
+            .get(&srs.g.len())
+            .unwrap()
+            .iter()
+            .map(|g| PolyComm {
+                unshifted: vec![*g],
+                shifted: None,
+            })
+            .collect();
 
-        big_srs.add_lagrange_basis( D::new(big_srs.g.len()));
-        let big_other_lgr_comms = srs.lagrange_bases.get(&big_srs.g.len()).unwrap();
+        // TODO: Don't need to copy all this data
+        let big_other_lgr_comms = big_srs
+            .lagrange_bases
+            .get(&big_srs.g.len())
+            .unwrap()
+            .iter()
+            .map(|g| PolyComm {
+                unshifted: vec![*g],
+                shifted: None,
+            })
+            .collect();
 
         // End of setup
         println!(
@@ -193,11 +223,19 @@ fn main() {
         });
 
         // Then, the authority responds with an initial BBA.
-        let init_signature = time_batch("Authority: Verify and sign initial accumulator", "user", accumulators_to_update, || {
-            update_authority
-                .batch_init::<SpongeQ, SpongeR>(vec![init_request.clone(); accumulators_to_update])
-                .unwrap()[0]
-        });
+        let init_signature = time_batch(
+            "Authority: Verify and sign initial accumulator",
+            "user",
+            accumulators_to_update,
+            || {
+                update_authority
+                    .batch_init::<SpongeQ, SpongeR>(vec![
+                        init_request.clone();
+                        accumulators_to_update
+                    ])
+                    .unwrap()[0]
+            },
+        );
 
         let mut user =
             bba::User::<FpInner>::init(user_config, init_secrets, init_signature).unwrap();
@@ -209,17 +247,29 @@ fn main() {
                 delta: 10 * (i + 1),
             })
             .collect();
-        let update_request = time(&*format!("User:      Create BBA update request [{} counters updated]", updates_per_accumulator), || {
-            user.request_update::<SpongeQ, SpongeR>(updates)
-        });
+        let update_request = time(
+            &*format!(
+                "User:      Create BBA update request [{} counters updated]",
+                updates_per_accumulator
+            ),
+            || user.request_update::<SpongeQ, SpongeR>(updates),
+        );
 
         // and the authority can validate the unlinkable update request and provide an updated BBA
-        let resp = time_batch("Authority: Update BBA", "user", accumulators_to_update, || {
-            update_authority.perform_updates::<SpongeQ, SpongeR>(vec![update_request.clone(); accumulators_to_update])[0]
-                .as_ref()
-                .unwrap()
-                .clone()
-        });
+        let resp = time_batch(
+            "Authority: Update BBA",
+            "user",
+            accumulators_to_update,
+            || {
+                update_authority.perform_updates::<SpongeQ, SpongeR>(vec![
+                    update_request.clone();
+                    accumulators_to_update
+                ])[0]
+                    .as_ref()
+                    .unwrap()
+                    .clone()
+            },
+        );
         time("User:      Process update response", || {
             user.process_update_response(&update_request.updates, &resp)
         });
@@ -229,10 +279,22 @@ fn main() {
         let opening_size = bba::proof_size(&opening.proof);
         // Finally, we can verify the correctness of the opening
 
-        time_batch("Authority: Verify BBA", "user", accumulators_to_update, || {
-            bba::RewardOpening::verify_batch::<PSpongeQ, PSpongeR>(
-                &signer, &bba, brave_pubkey, &g_group_map, &open_vk, vec![&opening; accumulators_to_update])
-        }).unwrap();
+        time_batch(
+            "Authority: Verify BBA",
+            "user",
+            accumulators_to_update,
+            || {
+                bba::RewardOpening::verify_batch::<PSpongeQ, PSpongeR>(
+                    &signer,
+                    &bba,
+                    brave_pubkey,
+                    &g_group_map,
+                    &open_vk,
+                    vec![&opening; accumulators_to_update],
+                )
+            },
+        )
+        .unwrap();
 
         println!("------------------------------");
         println!(

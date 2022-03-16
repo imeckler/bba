@@ -1,8 +1,9 @@
 use crate::proof_system::*;
 use crate::schnorr;
+use ark_ec::AffineCurve;
 use ark_ff::{FftField, PrimeField};
-use ark_ec::{AffineCurve};
-use schnorr::CoordinateCurve;
+use oracle::sponge::ScalarChallenge;
+use schnorr::{CoordinateCurve, CHALLENGE_LENGTH_IN_BITS};
 
 // Parameters for the update proof circuit.
 #[derive(Copy, Clone)]
@@ -15,8 +16,10 @@ pub struct Params<F> {
 pub struct Witness<G: AffineCurve> {
     pub signature: schnorr::Signature<G>,
     pub acc: G,
-    pub r: G::ScalarField,
+    pub r: ScalarChallenge<G::ScalarField>,
 }
+
+pub const R_LENGTH_IN_BITS: usize = 256;
 
 // Public input:
 //  [new_acc: curve_point]
@@ -35,6 +38,8 @@ pub fn circuit<
     sys: &mut Sys,
     public_input: Vec<Var<F>>,
 ) {
+    let zero = sys.constant(F::zero());
+
     let constant_curve_pt = |sys: &mut Sys, (x, y)| {
         let x = sys.constant(x);
         let y = sys.constant(y);
@@ -42,8 +47,8 @@ pub fn circuit<
     };
     let mask = {
         let h = constant_curve_pt(sys, params.h);
-        let r = sys.scalar(256, || w.as_ref().unwrap().r.into_repr());
-        sys.endo(constants, h, r)
+        let r = sys.endo_scalar(R_LENGTH_IN_BITS, || w.as_ref().unwrap().r.0.into_repr());
+        sys.endo(zero, constants, h, r, R_LENGTH_IN_BITS)
     };
     let prev_acc = {
         let mut a = None;
@@ -61,37 +66,26 @@ pub fn circuit<
         let zero = sys.constant(F::zero());
         let r = sys.var(|| w.as_ref().unwrap().signature.0);
         let e = {
-            let input = [prev_acc.0, prev_acc.1, r, zero, zero];
+            let input = vec![prev_acc.0, prev_acc.1, r];
             let e = sys.poseidon(constants, input)[0];
-            let e_bits = sys.scalar(256, || e.val().into_repr());
-            sys.assert_pack(e, &e_bits);
-            e_bits
+            e
         };
         let neg_e_pk = {
-            let (x, y) = sys.endo(constants, pubkey, e);
+            let (x, y) = sys.endo(zero, constants, pubkey, e, CHALLENGE_LENGTH_IN_BITS);
             // optimization: Could save a constraint by not explicitly doing the negation and using
             // sys.assert_add_group
             (x, sys.scale(-F::one(), y))
         };
-        let (rx, ry) = {
+        let (rx, _ry) = {
             let base = constant_curve_pt(sys, constants.base);
             let len = G::ScalarField::size_in_bits();
-            let s = sys.scalar(len, || {
-                (w.as_ref().unwrap().signature.1 - &shift::<G::ScalarField>(len - 1)).into_repr()
-            });
+            let s = sys.scalar(len, || w.as_ref().unwrap().signature.1);
             // TODO: Need to check that s is not one of the two forbidden values
-            let s_g = sys.scalar_mul(base, s);
-            sys.add_group(s_g, neg_e_pk)
+            let s_g = sys.scalar_mul(zero, base, s);
+            sys.add_group(zero, s_g, neg_e_pk)
         };
-        // optimization: Could save a constraint in constraining y to be even
-        let ry_bits = {
-            let bs = sys.scalar(256, || ry.val().into_repr());
-            sys.assert_pack(ry, &bs);
-            bs
-        };
-        sys.assert_eq(zero, ry_bits[0]);
         sys.assert_eq(rx, r);
     }
-    sys.assert_add_group(mask, prev_acc, (public_input[0], public_input[1]));
+    sys.assert_add_group(zero, mask, prev_acc, (public_input[0], public_input[1]));
     sys.zk()
 }

@@ -1,8 +1,8 @@
 use crate::bba;
 use crate::proof_system::*;
 use crate::schnorr;
+use ark_ec::AffineCurve;
 use ark_ff::{FftField, PrimeField};
-use ark_ec::{AffineCurve};
 use array_init::array_init;
 use kimchi::circuits::gate::GateType;
 use schnorr::CoordinateCurve;
@@ -64,19 +64,21 @@ pub fn circuit<
         sys.var(|| F::zero()),
         sys.var(|| F::zero()),
         sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
+        sys.var(|| F::zero()),
     ];
     sys.gate(GateSpec {
         typ: GateType::Generic,
         row: row0,
-        c: vec![
-            price(0),
-            -F::one(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-            F::zero(),
-        ],
+        c: vec![price(0), -F::one(), F::zero(), F::zero(), F::zero()],
     });
 
     for i in 1..bba::MAX_COUNTERS {
@@ -91,19 +93,21 @@ pub fn circuit<
             new_acc,
             sys.var(|| F::zero()),
             sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
+            sys.var(|| F::zero()),
         ];
         sys.gate(GateSpec {
             typ: GateType::Generic,
             row: row,
-            c: vec![
-                price(i),
-                F::one(),
-                -F::one(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-                F::zero(),
-            ],
+            c: vec![price(i), F::one(), -F::one(), F::zero(), F::zero()],
         });
         acc = new_acc;
     }

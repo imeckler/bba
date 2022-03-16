@@ -1,11 +1,8 @@
-use ark_ff::{BigInteger, PrimeField, UniformRand, Zero};
 use ark_ec::{AffineCurve, ProjectiveCurve};
-use array_init::array_init;
+use ark_ff::{BigInteger, PrimeField, UniformRand, Zero};
 use commitment_dlog::commitment::CommitmentCurve;
 use oracle::poseidon::*;
 use oracle::sponge::ScalarChallenge;
-
-use crate::random_oracle;
 
 pub trait CoordinateCurve: AffineCurve {
     fn to_coords(&self) -> Option<(Self::BaseField, Self::BaseField)>;
@@ -74,8 +71,6 @@ pub struct Signer<G: CoordinateCurve> {
     pub endo: G::ScalarField,
 }
 
-const COLUMNS: usize = 5;
-
 fn pack<B: BigInteger>(limbs_lsb: &[u64]) -> B {
     let mut res: B = 0.into();
     for &x in limbs_lsb.iter().rev() {
@@ -84,6 +79,8 @@ fn pack<B: BigInteger>(limbs_lsb: &[u64]) -> B {
     }
     res
 }
+
+pub const CHALLENGE_LENGTH_IN_BITS: usize = 256;
 
 impl<G: CoordinateCurve> SignatureParams for Signer<G>
 where
@@ -96,20 +93,13 @@ where
     // TODO
     fn hash(&self, _pk: PublicKey<G>, m: G, r: G::BaseField) -> G::ScalarField {
         let (x, y) = m.to_coords().unwrap();
-        let input = [x, y, r, G::BaseField::zero(), G::BaseField::zero()];
-        let res = (0..random_oracle::POSEIDON_ROUNDS).fold(input, |prev, round| {
-            let rc = &self.sponge.round_constants[round];
-            let s: [_; COLUMNS] = array_init(|j| sbox::<_, PlonkSpongeConstants15W>(prev[j]));
-            array_init(|i| {
-                let m = &self.sponge.mds[i];
-                rc[i]
-                    + &s.iter()
-                        .zip(m.iter())
-                        .fold(G::BaseField::zero(), |x, (s, &m)| m * s + x)
-            })
-        });
 
-        ScalarChallenge(G::ScalarField::from_repr(pack(res[0].into_repr().as_ref())).unwrap())
-            .to_field(&self.endo)
+        let mut s = vec![x, y, r];
+        oracle::poseidon::poseidon_block_cipher::<G::BaseField, PlonkSpongeConstants15W>(
+            &self.sponge,
+            &mut s,
+        );
+        ScalarChallenge(G::ScalarField::from_repr(pack(s[0].into_repr().as_ref())).unwrap())
+            .to_field_with_length(CHALLENGE_LENGTH_IN_BITS, &self.endo)
     }
 }

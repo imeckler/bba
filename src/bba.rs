@@ -1,24 +1,25 @@
-use rayon::prelude::*;
 use crate::bba_init_proof;
 use crate::bba_open_proof;
 use crate::bba_update_proof;
+use crate::bba_update_proof::R_LENGTH_IN_BITS;
+use rayon::prelude::*;
 // use crate::fft::lagrange_commitments;
 use crate::proof_system;
 use crate::schnorr;
+use ark_ec::{msm::VariableBaseMSM, AffineCurve, ProjectiveCurve};
 use ark_ff::{PrimeField, SquareRootField, UniformRand, Zero};
-use ark_ec::{AffineCurve, ProjectiveCurve, msm::VariableBaseMSM};
 use array_init::array_init;
 use commitment_dlog::{
     commitment::{CommitmentCurve, PolyComm},
     srs::SRS,
 };
-use oracle::FqSponge;
-use oracle::sponge::ScalarChallenge;
 use kimchi::{
     index::{Index, VerifierIndex},
     plonk_sponge::FrSponge,
     prover::ProverProof,
 };
+use oracle::sponge::ScalarChallenge;
+use oracle::FqSponge;
 use schnorr::SignatureParams;
 
 #[derive(Clone)]
@@ -41,22 +42,22 @@ impl<G: AffineCurve> Params<G> {
     pub fn randomize(&self, p: G) -> Randomized<G> {
         let rng = &mut rand::thread_rng();
         let r = ScalarChallenge(G::ScalarField::rand(rng));
-        let mask = self.h.mul(r.to_field(&self.endo));
+        let mask = self
+            .h
+            .mul(r.to_field_with_length(R_LENGTH_IN_BITS, &self.endo));
         let result = (p.into_projective() + &mask).into_affine();
         Randomized { result, witness: r }
     }
 
     pub fn secret_commitment(&self, secrets: &bba_init_proof::Witness<G>) -> G {
         let lg = &self.lagrange_commitments;
-        let bases = vec![self.h, lg[0], lg[2], lg[3], lg[4], lg[5], lg[6]];
+        let bases = vec![self.h, lg[0], lg[2], lg[3], lg[4]];
         let scalars = vec![
             secrets.r,
             secrets.c,
             secrets.alpha[0],
             secrets.alpha[1],
             secrets.alpha[2],
-            secrets.alpha[3],
-            secrets.alpha[4],
         ];
         let scalars: Vec<_> = scalars.iter().map(|x| x.into_repr()).collect();
         VariableBaseMSM::multi_scalar_mul(bases.as_slice(), scalars.as_slice()).into_affine()
@@ -91,7 +92,9 @@ pub struct UpdateRequest<G: AffineCurve, Other: AffineCurve> {
 
 // size in bytes
 pub fn proof_size<G: CommitmentCurve>(proof: &ProverProof<G>) -> usize {
-    fn poly_comm<A: ark_serialize::CanonicalSerialize + ark_serialize::CanonicalDeserialize>(pc: &PolyComm<A>) -> usize {
+    fn poly_comm<A: ark_serialize::CanonicalSerialize + ark_serialize::CanonicalDeserialize>(
+        pc: &PolyComm<A>,
+    ) -> usize {
         match &pc.shifted {
             None => pc.unshifted.len(),
             Some(_) => 1 + pc.unshifted.len(),
@@ -201,7 +204,7 @@ impl<C: proof_system::Cycle> RewardOpening<C> {
         authority_public_key: C::Inner,
         group_map: &C::InnerMap,
         vk: &VerifierIndex<C::Inner>,
-        openings: Vec<&Self>
+        openings: Vec<&Self>,
     ) -> Result<(), String> {
         let lgr_comms: Vec<PolyComm<_>> = bba
             .lagrange_commitments
@@ -211,11 +214,11 @@ impl<C: proof_system::Cycle> RewardOpening<C> {
                 shifted: None,
             })
             .collect();
-        let batch : Vec<_> = openings.iter().map(|x| (vk, &lgr_comms, &x.proof)).collect();
-        match ProverProof::verify::<EFqSponge, EFrSponge>(
-            &group_map,
-            &batch
-        ) {
+        let batch: Vec<_> = openings
+            .iter()
+            .map(|x| (vk, &lgr_comms, &x.proof))
+            .collect();
+        match ProverProof::verify::<EFqSponge, EFrSponge>(&group_map, &batch) {
             Ok(true) => Ok(()),
             Ok(false) | Err(_) => Err("Open proof failed to verify"),
         }?;
@@ -367,7 +370,7 @@ impl<C: proof_system::Cycle> User<C> {
                 r: secrets.r,
                 c: secrets.c,
                 alpha: secrets.alpha,
-                acc: acc,
+                acc,
                 counters,
                 signature,
                 pending_update_witness: None,
@@ -397,7 +400,23 @@ impl<C: proof_system::Cycle> User<C> {
         let proof = proof_system::prove::<C::Inner, _, EFqSponge, EFrSponge>(
             &config.prover.open_pk,
             &config.prover.g_group_map,
-            Some([Some(self.state.r), None, None, None, None]),
+            Some([
+                Some(self.state.r),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ]),
             vec![self.state.c, reward],
             |sys, p| {
                 bba_open_proof::circuit::<C::OuterField, C::Outer, _>(
@@ -431,7 +450,12 @@ impl<C: proof_system::Cycle> User<C> {
             }) => {
                 assert_eq!(
                     randomized_acc,
-                    state.acc + config.bba.h.mul(r.to_field(&config.bba.endo)).into_affine()
+                    state.acc
+                        + config
+                            .bba
+                            .h
+                            .mul(r.to_field_with_length(R_LENGTH_IN_BITS, &config.bba.endo))
+                            .into_affine()
                 );
                 let updated_acc = update_delta(
                     self.config.bba.lagrange_commitments.as_slice(),
@@ -447,7 +471,7 @@ impl<C: proof_system::Cycle> User<C> {
                     state.pending_update_witness = None;
                     state.acc = updated_acc;
                     state.signature = resp.signature;
-                    state.r += &r.to_field(&config.bba.endo);
+                    state.r += &r.to_field_with_length(R_LENGTH_IN_BITS, &config.bba.endo);
 
                     for SingleUpdate {
                         campaign_index,
@@ -464,12 +488,11 @@ impl<C: proof_system::Cycle> User<C> {
     }
 }
 
-impl<G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
-    UserConfig<G, Other>
+impl<G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>> UserConfig<G, Other>
 where
+    Other::BaseField: PrimeField,
     G::BaseField: SquareRootField + PrimeField,
-    <Other as AffineCurve>::Projective:
-        std::ops::MulAssign<<G as AffineCurve>::BaseField>,
+    <Other as AffineCurve>::Projective: std::ops::MulAssign<<G as AffineCurve>::BaseField>,
 {
     pub fn request_init<
         EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,
@@ -487,7 +510,13 @@ where
             None,
             vec![acc_x, acc_y],
             |sys, p| {
-                bba_init_proof::circuit::<_, G, _>(&self.prover.init_params, &Some(secrets), sys, p)
+                bba_init_proof::circuit::<_, G, _>(
+                    &self.prover.proof_system_constants,
+                    &self.prover.init_params,
+                    &Some(secrets),
+                    sys,
+                    p,
+                )
             },
         );
         InitRequest { acc, proof }
@@ -508,7 +537,7 @@ impl<C: proof_system::Cycle> User<C> {
         let witness = bba_update_proof::Witness {
             acc: state.acc,
             signature: state.signature,
-            r: randomization_witness.witness.0,
+            r: randomization_witness.witness,
         };
         let new_acc = randomization_witness.result;
         let (new_acc_x, new_acc_y) = new_acc.to_coordinates().unwrap();
@@ -565,9 +594,9 @@ fn batch_verify_proofs<
 >(
     group_map: &G::Map,
     proofs: Vec<(&VerifierIndex<G>, &Vec<PolyComm<G>>, &ProverProof<G>)>,
-) -> Vec<bool> 
+) -> Vec<bool>
 where
-G::BaseField: PrimeField
+    G::BaseField: PrimeField,
 {
     let verify = |ps: &Vec<_>| match ProverProof::verify::<EFqSponge, EFrSponge>(group_map, ps) {
         Ok(true) => true,
@@ -583,8 +612,7 @@ impl<G: CommitmentCurve, Other: CommitmentCurve<ScalarField = G::BaseField>>
 where
     G::BaseField: SquareRootField + PrimeField,
     Other::BaseField: PrimeField,
-    <Other as AffineCurve>::Projective:
-        std::ops::MulAssign<<G as AffineCurve>::BaseField>,
+    <Other as AffineCurve>::Projective: std::ops::MulAssign<<G as AffineCurve>::BaseField>,
 {
     pub fn perform_init<
         EFqSponge: Clone + FqSponge<Other::BaseField, Other, Other::ScalarField>,
@@ -623,21 +651,22 @@ where
             req.proof.public = vec![acc.0, acc.1];
         }
 
-        let batch : Vec<_> = reqs.iter().map(|r| (&self.init_vk, &self.big_other_lgr_comms, &r.proof)).collect();
+        let batch: Vec<_> = reqs
+            .iter()
+            .map(|r| (&self.init_vk, &self.big_other_lgr_comms, &r.proof))
+            .collect();
 
-        match ProverProof::verify::<EFqSponge, EFrSponge>(
-            &self.group_map,
-            &batch,
-        ) {
+        match ProverProof::verify::<EFqSponge, EFrSponge>(&self.group_map, &batch) {
             Ok(true) => Ok(()),
             Ok(false) | Err(_) => Err("Init proofs failed to verify"),
         }?;
-        let accs : Vec<_> = reqs.iter().map(|r| r.acc).collect();
+        let accs: Vec<_> = reqs.iter().map(|r| r.acc).collect();
         let signing_key = self.signing_key.clone();
         let signer = self.signer.clone();
-        let res : Vec<_> = accs.par_iter().map(|acc| {
-            signer.sign(signing_key, *acc)
-        }).collect();
+        let res: Vec<_> = accs
+            .par_iter()
+            .map(|acc| signer.sign(signing_key, *acc))
+            .collect();
         Ok(res)
     }
 
@@ -690,15 +719,15 @@ where
     }
 }
 
-impl<G: CommitmentCurve> Params<G> where G::BaseField: PrimeField {
-    pub fn new(srs: &mut SRS<G>, endo: G::ScalarField) -> Params<G> {
-        use ark_poly::EvaluationDomain;
-        let domain = ark_poly::Radix2EvaluationDomain::new(srs.g.len()).unwrap();
-        srs.add_lagrange_basis(domain);
+impl<G: CommitmentCurve> Params<G>
+where
+    G::BaseField: PrimeField,
+{
+    pub fn new(srs: std::sync::Arc<SRS<G>>, endo: G::ScalarField) -> Params<G> {
         Params {
             h: srs.h,
             endo,
-            lagrange_commitments: srs.lagrange_bases.get(&srs.g.len()).unwrap().to_vec()
+            lagrange_commitments: srs.lagrange_bases.get(&srs.g.len()).unwrap().to_vec(),
         }
     }
 }

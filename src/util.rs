@@ -16,6 +16,9 @@ where
     let x = f();
     let elapsed = start.elapsed();
     let per_item = elapsed / (batch_size as u32);
-    println!("{} ({:?} for {} {}s, {:?} per {})", label, elapsed, batch_size, item_label, per_item, item_label);
+    println!(
+        "{} ({:?} for {} {}s, {:?} per {})",
+        label, elapsed, batch_size, item_label, per_item, item_label
+    );
     x
 }
